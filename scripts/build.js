@@ -388,16 +388,66 @@ function applyLanguageMetadata(html, langKey) {
   return output;
 }
 
+function ensureDirectoryTrailingSlash(input) {
+  if (typeof input !== "string") {
+    return input;
+  }
+
+  const value = input.trim();
+  if (!value) {
+    return value;
+  }
+
+  const hashIndex = value.indexOf("#");
+  let hash = "";
+  let path = value;
+  if (hashIndex !== -1) {
+    hash = value.slice(hashIndex);
+    path = value.slice(0, hashIndex);
+  }
+
+  const queryIndex = path.indexOf("?");
+  let query = "";
+  if (queryIndex !== -1) {
+    query = path.slice(queryIndex);
+    path = path.slice(0, queryIndex);
+  }
+
+  if (!path || path.endsWith("/")) {
+    return `${path}${query}${hash}`;
+  }
+
+  const lastSlashIndex = path.lastIndexOf("/");
+  const lastSegment = lastSlashIndex >= 0 ? path.slice(lastSlashIndex + 1) : path;
+
+  if (!lastSegment || lastSegment.includes(".") || lastSegment === "~") {
+    return `${path}${query}${hash}`;
+  }
+
+  return `${path}/${query}${hash}`;
+}
+
 function resolveUrl(value) {
-  if (!value) return _cfg.identity.url;
-  if (value.startsWith("http://") || value.startsWith("https://")) return value;
-  if (value.startsWith("~/")) {
-    return `${_cfg.identity.url}/${value.slice(2)}`.replace(/([^:]\/)\/+/g, "$1");
+  const trimmedValue = typeof value === "string" ? value.trim() : "";
+  if (!trimmedValue) {
+    return ensureDirectoryTrailingSlash(_cfg.identity.url);
   }
-  if (value.startsWith("/")) {
-    return `${_cfg.identity.url}${value}`.replace(/([^:]\/)\/+/g, "$1");
+
+  if (trimmedValue.startsWith("http://") || trimmedValue.startsWith("https://")) {
+    return ensureDirectoryTrailingSlash(trimmedValue);
   }
-  return `${_cfg.identity.url}/${value}`.replace(/([^:]\/)\/+/g, "$1");
+
+  let absolute;
+  if (trimmedValue.startsWith("~/")) {
+    absolute = `${_cfg.identity.url}/${trimmedValue.slice(2)}`;
+  } else if (trimmedValue.startsWith("/")) {
+    absolute = `${_cfg.identity.url}${trimmedValue}`;
+  } else {
+    absolute = `${_cfg.identity.url}/${trimmedValue}`;
+  }
+
+  const normalized = absolute.replace(/([^:]\/)\/+/g, "$1");
+  return ensureDirectoryTrailingSlash(normalized);
 }
 
 function buildSiteData(lang) {
@@ -962,23 +1012,28 @@ function toPosixPath(value) {
 function buildContentUrl(canonical, lang, slug) {
   const normalizedLang = lang ?? _i18n.default;
   if (typeof canonical === "string" && canonical.trim().length > 0) {
-    const relative = canonicalToRelativePath(canonical.trim());
+    const trimmedCanonical = canonical.trim();
+    const relative = canonicalToRelativePath(trimmedCanonical);
     if (relative) {
-      return `/${relative}`.replace(/\/+/g, "/");
+      const normalizedRelative = `/${relative}`.replace(/\/+/g, "/");
+      return ensureDirectoryTrailingSlash(normalizedRelative);
     }
 
-    return canonical.trim();
+    return ensureDirectoryTrailingSlash(trimmedCanonical);
   }
   const fallback = canonicalToRelativePath(defaultCanonical(normalizedLang, slug));
   if (fallback) {
-    return `/${fallback}`.replace(/\/+/g, "/");
+    const normalizedFallback = `/${fallback}`.replace(/\/+/g, "/");
+    return ensureDirectoryTrailingSlash(normalizedFallback);
   }
   const slugSegment = slug ? `/${slug}` : "/";
   if (normalizedLang !== _i18n.default) {
-    return `/${normalizedLang}${slugSegment}`.replace(/\/+/g, "/");
+    const langPath = `/${normalizedLang}${slugSegment}`.replace(/\/+/g, "/");
+    return ensureDirectoryTrailingSlash(langPath);
   }
 
-  return slugSegment.replace(/\/+/g, "/");
+  const normalizedSlug = slugSegment.replace(/\/+/g, "/");
+  return ensureDirectoryTrailingSlash(normalizedSlug);
 }
 
 async function buildFooterPoliciesFromContent() {

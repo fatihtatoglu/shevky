@@ -12,7 +12,7 @@ const __dirname = _io.path.name(__filename);
 const ROOT_DIR = _io.path.combine(__dirname, "..");
 const SHEVKY_ENTRY = "shevky.js";
 const WATCH_PATH = "src";
-const DIST_DIR = "dist";
+const DIST_DIR = "dist/";
 
 function printHelp() {
     console.log(_cli.help());
@@ -26,11 +26,10 @@ async function runWatch() {
 }
 
 async function runDev() {
-    await _npm.execute(process.execPath, [SHEVKY_ENTRY, "--build"], ROOT_DIR);
+    await _build.execute();
     _log.info("Serving dist on http://localhost:3000");
 
-    const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
-    await _npm.execute(npxCommand, ["-y", "serve@14", DIST_DIR], ROOT_DIR);
+    await _npm.executeNpx(["-y", "serve@14", DIST_DIR]);
 }
 
 (async function main() {

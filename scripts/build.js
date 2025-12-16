@@ -16,9 +16,8 @@ import _analytics from "./analytics.js";
 import _core from "./core.js";
 import _social from "./social.js";
 
-const __filename = _io.url.toPath(import.meta.url);
-const __dirname = _io.path.name(__filename);
-const ROOT_DIR = _io.path.combine(__dirname, "..");
+const __dirname = _io.path.name(".");
+const ROOT_DIR = _io.path.combine(__dirname,);
 const SRC_DIR = _io.path.combine(ROOT_DIR, "src");
 const DIST_DIR = _io.path.combine(ROOT_DIR, "dist");
 const CONTENT_DIR = _io.path.combine(SRC_DIR, "content");
@@ -93,6 +92,15 @@ async function buildCss() {
   const configPath = _io.path.combine(ROOT_DIR, "tailwind.config.js");
   const sourePath = _io.path.combine(SRC_DIR, "css", "app.css");
   const distPath = _io.path.combine(DIST_DIR, "output.css");
+  if (!(await _io.file.exists(configPath))) {
+    console.warn(`[build] Skipping CSS pipeline because Tailwind config is missing at ${configPath}. Run 'shevky --init' or create the configuration file manually.`);
+    return;
+  }
+
+  if (!(await _io.file.exists(sourePath))) {
+    console.warn(`[build] Skipping CSS pipeline because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`);
+    return;
+  }
   const args = [
     "@tailwindcss/cli",
     "-c", configPath,
@@ -110,6 +118,11 @@ async function buildCss() {
 async function buildJs() {
   const sourePath = _io.path.combine(SRC_DIR, "js", "app.js");
   const distPath = _io.path.combine(DIST_DIR, "output.js");
+
+  if (!(await _io.file.exists(sourePath))) {
+    console.warn(`[build] Skipping JS bundling because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`);
+    return;
+  }
 
   const args = [
     "esbuild",
@@ -2009,6 +2022,10 @@ function registerLegacyPaths(lang, slug) {
 }
 
 async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
+  if (!(await _io.directory.exists(currentDir))) {
+    return;
+  }
+
   const entries = await _io.directory.read(currentDir);
   for (const entry of entries) {
     const fullPath = _io.path.combine(currentDir, entry);

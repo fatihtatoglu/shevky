@@ -42,29 +42,45 @@ async function _ensurePackages() {
 }
 
 async function _ensureFolders() {
-    await _io.directory.ensure(SRC_DIR);
+    await _io.directory.create(SRC_DIR);
     _log.info("src folder is OK.");
 
-    await _io.directory.ensure(CONTENT_DIR);
+    await _io.directory.create(CONTENT_DIR);
     _log.info("content folder is OK.");
 
-    await _io.directory.ensure(LAYOUTS_DIR);
+    await _io.directory.create(LAYOUTS_DIR);
     _log.info("layouts folder is OK.");
 
-    await _io.directory.ensure(COMPONENTS_DIR);
+    await _io.directory.create(COMPONENTS_DIR);
     _log.info("components folder is OK.");
 
-    await _io.directory.ensure(TEMPLATES_DIR);
+    await _io.directory.create(TEMPLATES_DIR);
     _log.info("templates folder is OK.");
 
-    await _io.directory.ensure(ASSETS_DIR);
+    await _io.directory.create(ASSETS_DIR);
     _log.info("assets folder is OK.");
 
-    await _io.directory.ensure(CSS_DIR);
+    await _io.directory.create(CSS_DIR);
     _log.info("css folder is OK.");
 
-    await _io.directory.ensure(JS_DIR);
+    await _io.directory.create(JS_DIR);
     _log.info("js folder is OK.");
+}
+
+async function createTailwindConfiguration() {
+    const path = _io.path.combine(ROOT_DIR, "tailwind.config.js");
+    const content = [
+        `import typography from "@tailwindcss/typography";`,
+        ``,
+        `/** @type {import('tailwindcss').Config} */`,
+        `export default {`,
+        `content: ["./src/**/*.{html,js}"],`,
+        `theme: {extend: {},},`,
+        `plugins: [typography],`,
+        `};`
+    ];
+
+    _io.file.write(path, content.join("\r\n"));
 }
 
 // ========== Initialization Functions ========== //
@@ -73,11 +89,12 @@ async function init() {
     await _ensurePackages();
     await _ensureFolders();
 
-    // create config files (site.json, i18n.json)d
+    // create config files (site.json, i18n.json)
 
     // create sample files
 
     // tailwind config
+    await createTailwindConfiguration();
 }
 
 const initializeApi = {

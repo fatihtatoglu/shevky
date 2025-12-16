@@ -52,6 +52,10 @@ async function writeFile(path, content) {
     await fsp.writeFile(path, content, "utf8");
 }
 
+async function copyFile(sourcePath, destinationPath) {
+    return await fsp.cp(sourcePath, destinationPath, { force: true });
+}
+
 // ========== Path Functions ========== //
 function getDirectoryName(path) {
     return dirname(path);
@@ -73,7 +77,8 @@ const API = {
     file: {
         exists: fileExists,
         read: readFile,
-        write: writeFile
+        write: writeFile,
+        copy: copyFile
     },
     path: {
         name: getDirectoryName,

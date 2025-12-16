@@ -1,18 +1,14 @@
+import degit from "degit";
+
 import _io from "./io.js";
 import _npm from "./npm.js";
 import _log from "./log.js";
 
-import { dirname, join } from "node:path";
+const TEMPLATE_REPO = "fatihtatoglu/shevky-simple-blog";
 
-const ROOT_DIR = dirname(".");
-const SRC_DIR = join(ROOT_DIR, "src");
-const CONTENT_DIR = join(SRC_DIR, "content");
-const LAYOUTS_DIR = join(SRC_DIR, "layouts");
-const COMPONENTS_DIR = join(SRC_DIR, "components");
-const TEMPLATES_DIR = join(SRC_DIR, "templates");
-const ASSETS_DIR = join(SRC_DIR, "assets");
-const CSS_DIR = join(SRC_DIR, "css");
-const JS_DIR = join(SRC_DIR, "js");
+const ROOT_DIR = _io.path.name(".");
+const SRC_DIR = _io.path.combine(ROOT_DIR, "src");
+const TEMP_DIR = _io.path.combine(ROOT_DIR, "tmp");
 
 const packages = [
     "gray-matter",
@@ -41,60 +37,77 @@ async function _ensurePackages() {
     }
 }
 
-async function _ensureFolders() {
-    await _io.directory.create(SRC_DIR);
-    _log.info("src folder is OK.");
+async function _cloneRepo() {
+    try {
+        const emitter = degit(TEMPLATE_REPO, {
+            cache: false,
+            force: true,
+            verbose: true,
+        });
 
-    await _io.directory.create(CONTENT_DIR);
-    _log.info("content folder is OK.");
+        await emitter.clone(TEMP_DIR);
 
-    await _io.directory.create(LAYOUTS_DIR);
-    _log.info("layouts folder is OK.");
+        await _io.directory.create(SRC_DIR);
+        await _io.directory.copy(_io.path.combine(TEMP_DIR, "src"), SRC_DIR);
 
-    await _io.directory.create(COMPONENTS_DIR);
-    _log.info("components folder is OK.");
+        await _io.file.copy(_io.path.combine(TEMP_DIR, "tailwind.config.js"), _io.path.combine(ROOT_DIR, "tailwind.config.js"));
 
-    await _io.directory.create(TEMPLATES_DIR);
-    _log.info("templates folder is OK.");
+        await _io.directory.remove(TEMP_DIR);
 
-    await _io.directory.create(ASSETS_DIR);
-    _log.info("assets folder is OK.");
-
-    await _io.directory.create(CSS_DIR);
-    _log.info("css folder is OK.");
-
-    await _io.directory.create(JS_DIR);
-    _log.info("js folder is OK.");
+        _log.info("simpe blog code is cloned.");
+    } catch (err) {
+        console.log(err.message || err)
+        process.exit(1);
+    }
 }
 
-async function createTailwindConfiguration() {
-    const path = _io.path.combine(ROOT_DIR, "tailwind.config.js");
-    const content = [
-        `import typography from "@tailwindcss/typography";`,
-        ``,
-        `/** @type {import('tailwindcss').Config} */`,
-        `export default {`,
-        `content: ["./src/**/*.{html,js}"],`,
-        `theme: {extend: {},},`,
-        `plugins: [typography],`,
-        `};`
+async function _addRequiredFiles() {
+    const gitignore = [
+        `node_modules/`,
+        `dist/`,
+        ``
     ];
+    await _io.file.write(_io.path.combine(ROOT_DIR, ".gitignore"), gitignore.join('\r\n'));
 
-    _io.file.write(path, content.join("\r\n"));
+    _log.info("required files are added.");
+}
+
+async function _updatePackageJSON() {
+    const filePath = _io.path.combine(ROOT_DIR, "package.json");
+    if (!(await _io.file.exists(filePath))) {
+        _log.err("package.json not found.");
+        process.exit(1);
+    }
+
+    const pkgRaw = await _io.file.read(filePath);
+    let pkg;
+
+    try {
+        pkg = JSON.parse(pkgRaw);
+    } catch (err) {
+        _log.err("Invalid package.json");
+        process.exit(1);
+    }
+
+    pkg.scripts = pkg.scripts || {};
+
+    pkg.scripts.build = "npx shevky --build";
+    pkg.scripts.dev = "npx shevky --dev";
+
+    await _io.file.write(
+        filePath,
+        JSON.stringify(pkg, null, 2) + "\n"
+    );
+
+    _log.info("package.json scripts updated.");
 }
 
 // ========== Initialization Functions ========== //
-
 async function init() {
+    await _cloneRepo();
     await _ensurePackages();
-    await _ensureFolders();
-
-    // create config files (site.json, i18n.json)
-
-    // create sample files
-
-    // tailwind config
-    await createTailwindConfiguration();
+    await _addRequiredFiles();
+    await _updatePackageJSON();
 }
 
 const initializeApi = {

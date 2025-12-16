@@ -851,8 +851,14 @@ async function renderContentTemplate(templateName, contentHtml, front, lang, dic
     coverAlt: front.coverAlt ?? "",
     lang,
   };
+  if (front?.collectionType) {
+    normalizedFront.collectionType = normalizeCollectionTypeValue(front.collectionType);
+  }
   normalizedFront.seriesListing = buildSeriesListing(normalizedFront, lang);
   const listing = listingOverride ?? buildCollectionListing(normalizedFront, lang);
+  const collectionFlags = buildCollectionTypeFlags(
+    listing?.type ?? resolveCollectionType(normalizedFront, listing?.items),
+  );
   const site = buildSiteData(lang);
   const languageFlags = _i18n.flags(lang);
   return Mustache.render(template, {
@@ -865,6 +871,7 @@ async function renderContentTemplate(templateName, contentHtml, front, lang, dic
     isEnglish: languageFlags.isEnglish,
     isTurkish: languageFlags.isTurkish,
     i18n: resolvedDictionary,
+    ...collectionFlags,
   });
 }
 
@@ -1078,6 +1085,8 @@ function buildCollectionListing(front, lang) {
   const key = resolveListingKey(front);
   const sourceItems = key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
   const items = dedupeCollectionItems(sourceItems);
+  const collectionType = resolveCollectionType(front, items);
+  const typeFlags = buildCollectionTypeFlags(collectionType);
   return {
     key,
     lang: normalizedLang,
@@ -1085,6 +1094,8 @@ function buildCollectionListing(front, lang) {
     hasItems: items.length > 0,
     emptyMessage: resolveListingEmpty(front, normalizedLang),
     heading: resolveListingHeading(front),
+    type: collectionType,
+    ...typeFlags,
   };
 }
 
@@ -1137,6 +1148,50 @@ function buildSeriesListing(front, lang) {
     hasLabel: Boolean(seriesName),
     hasItems: items.length > 0,
     items,
+  };
+}
+
+function normalizeCollectionTypeValue(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().toLowerCase();
+}
+
+function resolveCollectionType(front, items, fallback) {
+  const explicitCandidate =
+    normalizeCollectionTypeValue(front?.collectionType) ||
+    normalizeCollectionTypeValue(front?.listType) ||
+    normalizeCollectionTypeValue(front?.type);
+  if (explicitCandidate) {
+    return explicitCandidate;
+  }
+
+  if (Array.isArray(items)) {
+    const entryWithType = items.find(
+      (entry) => typeof entry?.type === "string" && entry.type.trim().length > 0,
+    );
+    if (entryWithType) {
+      return entryWithType.type.trim().toLowerCase();
+    }
+  }
+
+  if (typeof fallback === "string" && fallback.trim().length > 0) {
+    return fallback.trim().toLowerCase();
+  }
+
+  return "";
+}
+
+function buildCollectionTypeFlags(type) {
+  const normalized = normalizeCollectionTypeValue(type);
+  return {
+    collectionType: normalized,
+    isTag: normalized === "tag",
+    isCategory: normalized === "category",
+    isAuthor: normalized === "author",
+    isSeries: normalized === "series",
+    isHome: normalized === "home",
   };
 }
 
@@ -1502,7 +1557,9 @@ function collectSitemapEntriesFromDynamicCollections() {
     const types =
       Array.isArray(config.types) && config.types.length > 0
         ? config.types
-          .map((value) => (typeof value === "string" ? value.trim() : ""))
+          .map((value) =>
+            normalizeCollectionTypeValue(typeof value === "string" ? value : ""),
+          )
           .filter((value) => value.length > 0)
         : null;
 
@@ -1526,7 +1583,7 @@ function collectSitemapEntriesFromDynamicCollections() {
           continue;
         }
 
-        const hasMatchingType = items.some((entry) => types.includes(entry.type));
+        const hasMatchingType = items.some((entry) => types.includes(normalizeCollectionTypeValue(entry.type)));
         if (!hasMatchingType) {
           continue;
         }
@@ -1713,6 +1770,8 @@ async function buildPaginatedCollectionPages(options) {
   const pageSize = pageSizeSetting > 0 ? pageSizeSetting : 5;
   const totalPages = Math.max(1, pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1);
   const emptyMessage = resolveListingEmpty(frontMatter, lang);
+  const collectionType = resolveCollectionType(frontMatter, allItems);
+  const collectionFlags = buildCollectionTypeFlags(collectionType);
 
   for (let pageIndex = 1; pageIndex <= totalPages; pageIndex += 1) {
     const startIndex = (pageIndex - 1) * pageSize;
@@ -1755,6 +1814,8 @@ async function buildPaginatedCollectionPages(options) {
       hasPagination: totalPages > 1,
       prevUrl: hasPrev ? buildContentUrl(null, lang, prevSlug) : "",
       nextUrl: hasNext ? buildContentUrl(null, lang, nextSlug) : "",
+      type: collectionType,
+      ...collectionFlags,
     };
 
     let canonical = frontMatter.canonical;
@@ -1772,6 +1833,9 @@ async function buildPaginatedCollectionPages(options) {
       slug: pageSlug,
       canonical,
     };
+    if (collectionType) {
+      frontForPage.collectionType = collectionType;
+    }
 
     const renderedContent = await renderContentTemplate(
       templateName,
@@ -1972,6 +2036,11 @@ async function buildDynamicCollectionPages() {
         if (configKey === "series") {
           front.series = key;
           front.seriesTitle = displayKey;
+        }
+        const fallbackType = normalizeCollectionTypeValue(types.length === 1 ? types[0] : "");
+        const resolvedCollectionType = resolveCollectionType(front, dedupedItems, fallbackType);
+        if (resolvedCollectionType) {
+          front.collectionType = resolvedCollectionType;
         }
 
         const contentHtml = await renderContentTemplate(templateName, "", front, lang, dictionary);

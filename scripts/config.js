@@ -13,6 +13,7 @@ import _io from "./io.js";
  * @property {string} gtmId Google Tag Manager container id.
  * @property {string} gaId Google Analytics measurement id.
  * @property {string} clarityId Microsoft Clarity project id.
+ * @property {string} metaPixelId Meta Pixel id.
  */
 
 /**
@@ -122,7 +123,8 @@ const FALLBACKS = {
         enabled: false,
         gtmId: "GTM-XXXXXXX",
         gaId: "G-XXXXXXXXXX",
-        clarityId: "CLARITY-ID"
+        clarityId: "CLARITY-ID",
+        metaPixelId: "META-PIXEL-ID"
     },
     features: {
         postOperations: {

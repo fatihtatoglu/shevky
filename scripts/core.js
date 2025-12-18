@@ -216,7 +216,7 @@ async function loadComponents(directoryPath) {
         const key = `components/${entry.replace(/\.mustache$/, "")}`;
         const path = _io.path.combine(directoryPath, entry);
 
-        container.partials[key] = await _io.file.read(path);
+        container.components[key] = await _io.file.read(path);
     });
 }
 

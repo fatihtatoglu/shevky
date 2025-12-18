@@ -922,6 +922,9 @@ async function renderContentTemplate(templateName, contentHtml, front, lang, dic
     isTurkish: languageFlags.isTurkish,
     i18n: resolvedDictionary,
     ...collectionFlags,
+  }, {
+    ..._core.partials.files,
+    ..._core.components.files,
   });
 }
 
@@ -1795,7 +1798,10 @@ async function buildContentPages() {
       },
     };
     view.easterEgg = buildEasterEggPayload(view);
-    const rendered = Mustache.render(layoutTemplate, view, _core.partials.files);
+    const rendered = Mustache.render(layoutTemplate, view, {
+      ..._core.partials.files,
+      ..._core.components.files,
+    });
     const finalHtml = await transformHtml(rendered);
     const relativePath = buildOutputPath(file.header, file.lang, file.slug);
     await writeHtmlFile(relativePath, finalHtml);
@@ -1924,7 +1930,10 @@ async function buildPaginatedCollectionPages(options) {
       },
     };
     view.easterEgg = buildEasterEggPayload(view);
-    const rendered = Mustache.render(layoutTemplate, view, _core.partials.files);
+    const rendered = Mustache.render(layoutTemplate, view, {
+      ..._core.partials.files,
+      ..._core.components.files,
+    });
     const finalHtml = await transformHtml(rendered);
     const relativePath = buildOutputPath(frontForPage, lang, pageSlug);
     await writeHtmlFile(relativePath, finalHtml);
@@ -2124,7 +2133,10 @@ async function buildDynamicCollectionPages() {
           },
         };
         view.easterEgg = buildEasterEggPayload(view);
-        const rendered = Mustache.render(layoutTemplate, view, _core.partials.files);
+        const rendered = Mustache.render(layoutTemplate, view, {
+          ..._core.partials.files,
+          ..._core.components.files,
+        });
         const finalHtml = await transformHtml(rendered);
         const relativePath = buildOutputPath(front, lang, slug);
         await writeHtmlFile(relativePath, finalHtml);

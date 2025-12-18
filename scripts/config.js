@@ -78,6 +78,16 @@ import _io from "./io.js";
  * @property {boolean} rss
  * @property {string} github
  * @property {string} linkedin
+ * @property {string} x
+ * @property {string} facebook
+ * @property {string} instagram
+ * @property {string} youtube
+ * @property {string} tiktok
+ * @property {string} substack
+ * @property {string} medium
+ * @property {string} devto
+ * @property {string} stackoverflow
+ * @property {string} mastodon
  */
 
 /**
@@ -161,7 +171,21 @@ const FALLBACKS = {
         email: "<name>@<surname>.net",
         url: "http://localhost:3000",
         themeColor: "#5a8df0",
-        social: {}
+        social: {
+            rss: false,
+            github: "",
+            linkedin: "",
+            x: "",
+            facebook: "",
+            instagram: "",
+            youtube: "",
+            tiktok: "",
+            substack: "",
+            medium: "",
+            devto: "",
+            stackoverflow: "",
+            mastodon: ""
+        }
     },
     robots: {
         allow: ["/"],

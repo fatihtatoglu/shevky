@@ -80,6 +80,9 @@ async function loadFromContentFile(filePath) {
         get isDraft() {
             return _fmt.boolean(data.draft);
         },
+        get sourcePath() {
+            return filePath;
+        },
         get status() {
             return typeof data.status === "string" ? data.status.trim().toLowerCase() : "";
         },
@@ -325,6 +328,9 @@ const API = {
     },
     layouts: {
         load: loadLayout,
+        list: function () {
+            return Array.from(container.layouts.keys());
+        },
         /**
          * Retrieves a layout by name.
          * @param {string} name Layout identifier.
@@ -340,6 +346,9 @@ const API = {
     },
     templates: {
         load: loadTemplate,
+        list: function () {
+            return Array.from(container.templates.keys());
+        },
         /**
          * Retrieves a template by name.
          * @param {string} name Template identifier.

@@ -56,6 +56,20 @@ async function copyFile(sourcePath, destinationPath) {
     return await fsp.cp(sourcePath, destinationPath, { force: true });
 }
 
+async function statFile(path) {
+    try {
+        return await fsp.stat(path);
+    }
+    catch {
+        return null;
+    }
+}
+
+async function fileSize(path) {
+    const stats = await statFile(path);
+    return stats?.size ?? 0;
+}
+
 // ========== Path Functions ========== //
 function getDirectoryName(path) {
     return dirname(path);
@@ -78,7 +92,9 @@ const API = {
         exists: fileExists,
         read: readFile,
         write: writeFile,
-        copy: copyFile
+        copy: copyFile,
+        stat: statFile,
+        size: fileSize
     },
     path: {
         name: getDirectoryName,

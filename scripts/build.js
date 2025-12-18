@@ -9,6 +9,7 @@ import { minify as minifyHtml } from "html-minifier-terser";
 
 import _io from "./io.js";
 import _cfg from "./config.js";
+import _log from "./log.js";
 import _i18n from "./i18n.js";
 import _npm from "./npm.js";
 import _fmt from "./format.js";
@@ -30,11 +31,43 @@ const I18N_CONFIG_PATH = _io.path.combine(SRC_DIR, "i18n.json");
 
 await _i18n.load(I18N_CONFIG_PATH);
 await _cfg.load(SITE_CONFIG_PATH);
+_log.step("CONFIG_READY", { file: normalizeLogPath(SITE_CONFIG_PATH), debug: _cfg.build.debug ? "on" : "off" });
+_log.step("I18N_READY", { file: normalizeLogPath(I18N_CONFIG_PATH), locales: _i18n.supported.length });
 await _core.contents.load(CONTENT_DIR);
+const contentSample = previewList(_core.contents.files.map(describeContentEntry), 8);
+_log.step("CONTENT_LOADED", {
+  dir: normalizeLogPath(CONTENT_DIR),
+  files: _core.contents.count,
+  sample: contentSample,
+});
 await _core.partials.load(LAYOUTS_DIR);
+const partialKeys = Object.keys(_core.partials.files);
+_log.step("PARTIALS_READY", {
+  dir: normalizeLogPath(LAYOUTS_DIR),
+  total: partialKeys.length,
+  sample: previewList(partialKeys, 8),
+});
 await _core.components.load(COMPONENTS_DIR);
+const componentKeys = Object.keys(_core.components.files);
+_log.step("COMPONENTS_READY", {
+  dir: normalizeLogPath(COMPONENTS_DIR),
+  files: componentKeys.length,
+  sample: previewList(componentKeys, 8),
+});
 await _core.layouts.load(LAYOUTS_DIR);
+const layoutNames = typeof _core.layouts.list === "function" ? _core.layouts.list() : [];
+_log.step("LAYOUTS_READY", {
+  dir: normalizeLogPath(LAYOUTS_DIR),
+  total: layoutNames.length,
+  sample: previewList(layoutNames, 8),
+});
 await _core.templates.load(TEMPLATES_DIR);
+const templateKeys = typeof _core.templates.list === "function" ? _core.templates.list() : [];
+_log.step("TEMPLATES_READY", {
+  dir: normalizeLogPath(TEMPLATES_DIR),
+  total: templateKeys.length,
+  sample: previewList(templateKeys, 8),
+});
 
 const versionToken = crypto.randomBytes(6).toString("hex");
 const SEO_INCLUDE_COLLECTIONS = _cfg.seo.includeCollections;
@@ -83,9 +116,78 @@ markdownRenderer.code = (token, infostring) => {
 };
 marked.use({ renderer: markdownRenderer });
 
+function byteLength(input) {
+  if (input === undefined || input === null) {
+    return 0;
+  }
+  if (typeof input !== "string") {
+    return Buffer.byteLength(String(input));
+  }
+  return Buffer.byteLength(input);
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const precision = unitIndex === 0 ? 0 : 2;
+  return `${value.toFixed(precision)}${units[unitIndex]}`;
+}
+
+function normalizeLogPath(pathValue) {
+  if (!pathValue) {
+    return "";
+  }
+  const normalized = toPosixPath(pathValue);
+  if (normalized.startsWith("./")) {
+    return normalized.slice(2);
+  }
+  return normalized;
+}
+
+function previewList(values, limit = 5) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return undefined;
+  }
+  const normalized = values
+    .map((value) => (value == null ? "" : String(value).trim()))
+    .filter((value) => value.length > 0);
+  if (!normalized.length) {
+    return undefined;
+  }
+  const slice = normalized.slice(0, limit);
+  const extra = normalized.length - slice.length;
+  if (extra > 0) {
+    return `${slice.join(", ")} +${extra}`;
+  }
+  return slice.join(", ");
+}
+
+function describeContentEntry(file) {
+  if (!file || typeof file !== "object") {
+    return "";
+  }
+  return (
+    (typeof file.id === "string" && file.id.trim()) ||
+    (typeof file.slug === "string" && file.slug.trim()) ||
+    (typeof file.title === "string" && file.title.trim()) ||
+    normalizeLogPath(file.sourcePath) ||
+    ""
+  );
+}
+
 async function ensureDist() {
   await _io.directory.remove(DIST_DIR);
+  _log.step("DIST_CLEAN", { target: normalizeLogPath(DIST_DIR) });
   await _io.directory.create(DIST_DIR);
+  _log.step("DIST_READY", { target: normalizeLogPath(DIST_DIR) });
 }
 
 async function buildCss() {
@@ -94,11 +196,13 @@ async function buildCss() {
   const distPath = _io.path.combine(DIST_DIR, "output.css");
   if (!(await _io.file.exists(configPath))) {
     console.warn(`[build] Skipping CSS pipeline because Tailwind config is missing at ${configPath}. Run 'shevky --init' or create the configuration file manually.`);
+    _log.step("BUILD_CSS_SKIP", { reason: "missing-config", target: normalizeLogPath(configPath) });
     return;
   }
 
   if (!(await _io.file.exists(sourePath))) {
     console.warn(`[build] Skipping CSS pipeline because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`);
+    _log.step("BUILD_CSS_SKIP", { reason: "missing-source", source: normalizeLogPath(sourePath) });
     return;
   }
   const args = [
@@ -113,6 +217,12 @@ async function buildCss() {
   }
 
   await _npm.executeNpx(args, ROOT_DIR);
+  const bundleSize = await _io.file.size(distPath);
+  _log.step("BUILD_CSS", {
+    source: normalizeLogPath(sourePath),
+    target: normalizeLogPath(distPath),
+    output: formatBytes(bundleSize),
+  });
 }
 
 async function buildJs() {
@@ -121,6 +231,7 @@ async function buildJs() {
 
   if (!(await _io.file.exists(sourePath))) {
     console.warn(`[build] Skipping JS bundling because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`);
+    _log.step("BUILD_JS_SKIP", { reason: "missing-source", source: normalizeLogPath(sourePath) });
     return;
   }
 
@@ -136,6 +247,12 @@ async function buildJs() {
   }
 
   await _npm.executeNpx(args, ROOT_DIR);
+  const bundleSize = await _io.file.size(distPath);
+  _log.step("BUILD_JS", {
+    source: normalizeLogPath(sourePath),
+    target: normalizeLogPath(distPath),
+    output: formatBytes(bundleSize),
+  });
 }
 
 async function transformHtml(html) {
@@ -362,10 +479,23 @@ function buildEasterEggPayload(view) {
   }
 }
 
-async function writeHtmlFile(relativePath, html) {
+async function writeHtmlFile(relativePath, html, meta = {}) {
   const destPath = _io.path.combine(DIST_DIR, relativePath);
   await _io.directory.create(_io.path.name(destPath));
-  await _io.file.write(destPath, html);
+  const payload = typeof html === "string" ? html : String(html ?? "");
+  await _io.file.write(destPath, payload);
+  const outputBytes = byteLength(payload);
+  _log.step(meta.action ?? "WRITE_HTML", {
+    target: normalizeLogPath(destPath),
+    source: normalizeLogPath(meta.source),
+    type: meta.type ?? "html",
+    lang: meta.lang,
+    template: meta.template,
+    items: meta.items,
+    page: meta.page,
+    input: typeof meta.inputBytes === "number" ? formatBytes(meta.inputBytes) : undefined,
+    output: formatBytes(outputBytes),
+  });
 }
 
 function applyLanguageMetadata(html, langKey) {
@@ -958,14 +1088,15 @@ function renderMarkdownComponents(markdown, context = {}) {
     const template = _core.components.files[partialKey];
     if (!template) return "";
     const tokenId = `COMPONENT_SLOT_${placeholders.length}_${componentName.replace(/[^A-Za-z0-9_-]/g, "_")}_${crypto.randomBytes(4).toString("hex")}`;
-    const marker = `\n<!--${tokenId}-->\n`;
+    const comment = `<!--${tokenId}-->`;
+    const marker = `\n${comment}\n`;
 
     const html = Mustache.render(template, context, {
       ..._core.partials.files,
       ..._core.components.files,
     });
 
-    placeholders.push({ marker, html });
+    placeholders.push({ token: tokenId, marker, html });
     return marker;
   });
 
@@ -977,13 +1108,30 @@ function renderMarkdownComponents(markdown, context = {}) {
   return { markdown: renderedMarkdown, placeholders };
 }
 
+function escapeRegExp(value = "") {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function injectMarkdownComponents(html, placeholders) {
   if (!html || !placeholders || !placeholders.length) {
     return html;
   }
   let output = html;
-  placeholders.forEach(({ marker, html: snippet }) => {
-    output = output.split(marker).join(snippet);
+  placeholders.forEach(({ token, marker, html: snippet }) => {
+    const safeSnippet = snippet ?? "";
+    let nextOutput = output;
+
+    if (token) {
+      const pattern = new RegExp(`(?:<p>)?\\s*<!--${escapeRegExp(token)}-->\\s*(?:</p>)?`, "g");
+      const replaced = nextOutput.replace(pattern, safeSnippet);
+      nextOutput = replaced;
+    }
+
+    if (nextOutput === output && marker) {
+      nextOutput = nextOutput.split(marker).join(safeSnippet);
+    }
+
+    output = nextOutput;
   });
   return output;
 }
@@ -1505,7 +1653,13 @@ async function buildRssFeeds() {
 
     const relativePath =
       lang === _i18n.default ? "feed.xml" : _io.path.combine(lang, "feed.xml");
-    await writeHtmlFile(relativePath, rssXml);
+    await writeHtmlFile(relativePath, rssXml, {
+      action: "BUILD_FEED",
+      type: "xml",
+      lang,
+      items: rssEntries.length,
+      inputBytes: byteLength(itemsXml),
+    });
   }
 }
 
@@ -1593,7 +1747,12 @@ async function buildSitemap() {
     "",
   ].join("\n");
 
-  await writeHtmlFile("sitemap.xml", sitemapXml);
+  await writeHtmlFile("sitemap.xml", sitemapXml, {
+    action: "BUILD_SITEMAP",
+    type: "xml",
+    items: entries.length,
+    inputBytes: byteLength(urlset),
+  });
 }
 
 function collectSitemapEntriesFromDynamicCollections() {
@@ -1702,7 +1861,12 @@ async function buildRobotsTxt() {
   lines.push(`Sitemap: ${base}/sitemap.xml`);
   lines.push("");
 
-  await writeHtmlFile("robots.txt", lines.join("\n"));
+  const payload = lines.join("\n");
+  await writeHtmlFile("robots.txt", payload, {
+    action: "BUILD_ROBOTS",
+    type: "text",
+    inputBytes: byteLength(payload),
+  });
 }
 
 async function buildMenuItemsFromContent() {
@@ -1752,9 +1916,21 @@ async function buildContentPages() {
   }
 
   for (const file of _core.contents.files) {
+    _log.step("PROCESS_CONTENT", {
+      file: normalizeLogPath(file.sourcePath),
+      lang: file.lang,
+      template: file.template,
+      size: formatBytes(byteLength(file.content)),
+    });
     const dictionary = _i18n.get(file.lang);
     const componentContext = buildContentComponentContext(file.header, file.lang, dictionary);
     const { markdown: markdownSource, placeholders } = renderMarkdownComponents(file.content, componentContext);
+    if (placeholders.length > 0) {
+      _log.step("COMPONENT_SLOTS", {
+        file: normalizeLogPath(file.sourcePath),
+        count: placeholders.length,
+      });
+    }
 
     const markdownHtml = marked.parse(markdownSource ?? "");
     const hydratedHtml = injectMarkdownComponents(markdownHtml ?? "", placeholders);
@@ -1768,6 +1944,7 @@ async function buildContentPages() {
         templateName: file.template,
         contentHtml: hydratedHtml,
         dictionary,
+        sourcePath: file.sourcePath,
       });
 
       continue;
@@ -1804,7 +1981,14 @@ async function buildContentPages() {
     });
     const finalHtml = await transformHtml(rendered);
     const relativePath = buildOutputPath(file.header, file.lang, file.slug);
-    await writeHtmlFile(relativePath, finalHtml);
+    await writeHtmlFile(relativePath, finalHtml, {
+      action: "BUILD_PAGE",
+      type: file.template,
+      source: file.sourcePath,
+      lang: file.lang,
+      template: file.layout,
+      inputBytes: byteLength(file.content),
+    });
     GENERATED_PAGES.add(toPosixPath(relativePath));
     registerLegacyPaths(file.lang, file.slug);
   }
@@ -1821,6 +2005,7 @@ async function buildPaginatedCollectionPages(options) {
     templateName,
     contentHtml,
     dictionary,
+    sourcePath,
   } = options;
 
   const langCollections = PAGES[lang] ?? {};
@@ -1936,7 +2121,16 @@ async function buildPaginatedCollectionPages(options) {
     });
     const finalHtml = await transformHtml(rendered);
     const relativePath = buildOutputPath(frontForPage, lang, pageSlug);
-    await writeHtmlFile(relativePath, finalHtml);
+    await writeHtmlFile(relativePath, finalHtml, {
+      action: "BUILD_COLLECTION",
+      type: templateName,
+      source: sourcePath,
+      lang,
+      template: layoutName,
+      items: items.length,
+      page: `${pageIndex}/${totalPages}`,
+      inputBytes: byteLength(renderedContent),
+    });
     GENERATED_PAGES.add(toPosixPath(relativePath));
     registerLegacyPaths(lang, pageSlug);
   }
@@ -2139,7 +2333,15 @@ async function buildDynamicCollectionPages() {
         });
         const finalHtml = await transformHtml(rendered);
         const relativePath = buildOutputPath(front, lang, slug);
-        await writeHtmlFile(relativePath, finalHtml);
+        await writeHtmlFile(relativePath, finalHtml, {
+          action: "BUILD_DYNAMIC_COLLECTION",
+          type: templateName,
+          source: normalizeLogPath(_io.path.combine("collections", configKey)),
+          lang,
+          template: layoutName,
+          items: dedupedItems.length,
+          inputBytes: byteLength(contentHtml),
+        });
         GENERATED_PAGES.add(toPosixPath(relativePath));
         registerLegacyPaths(lang, slug);
       }
@@ -2187,27 +2389,68 @@ async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
         }
 
         segments.push("index.html");
-        await writeHtmlFile(_io.path.combine(...segments), localized);
+        await writeHtmlFile(_io.path.combine(...segments), localized, {
+          action: "COPY_HTML",
+          type: "static",
+          source: fullPath,
+          lang: langCode,
+          inputBytes: byteLength(transformed),
+        });
       });
 
       continue;
     }
 
-    await writeHtmlFile(relPath, transformed);
+    await writeHtmlFile(relPath, transformed, {
+      action: "COPY_HTML",
+      type: "static",
+      source: fullPath,
+      lang: _i18n.default,
+      inputBytes: byteLength(transformed),
+    });
   }
 }
 
 async function copyStaticAssets() {
   if (!(await _io.directory.exists(ASSETS_DIR))) {
+    _log.step("ASSETS_SKIP", { reason: "missing", dir: normalizeLogPath(ASSETS_DIR) });
     return;
   }
 
   const targetDir = _io.path.combine(DIST_DIR, "assets");
 
   await _io.directory.copy(ASSETS_DIR, targetDir);
+  _log.step("ASSETS_COPIED", {
+    source: normalizeLogPath(ASSETS_DIR),
+    target: normalizeLogPath(targetDir),
+  });
+
+  if (!_cfg.build.debug) {
+    return;
+  }
+
+  try {
+    const entries = await _io.directory.read(ASSETS_DIR);
+    for (const entry of entries) {
+      const srcPath = _io.path.combine(ASSETS_DIR, entry);
+      const stats = await _io.file.stat(srcPath);
+      if (!stats || (typeof stats.isFile === "function" && !stats.isFile())) {
+        continue;
+      }
+      const destPath = _io.path.combine(targetDir, entry);
+      _log.step("COPY_ASSET", {
+        source: normalizeLogPath(srcPath),
+        target: normalizeLogPath(destPath),
+        output: formatBytes(stats?.size ?? 0),
+      });
+    }
+  } catch (error) {
+    _log.debug("ASSET_SCAN_FAILED", { message: error?.message ?? error });
+  }
 }
 
 async function main() {
+  _log.step("BUILD_START", { dist: normalizeLogPath(DIST_DIR) });
   await ensureDist();
   await buildCss();
   await buildJs();
@@ -2218,6 +2461,7 @@ async function main() {
   await buildRssFeeds();
   await buildSitemap();
   await buildRobotsTxt();
+  _log.step("BUILD_DONE", { dist: normalizeLogPath(DIST_DIR) });
 }
 
 const API = {

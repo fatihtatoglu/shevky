@@ -917,12 +917,27 @@ function buildHomeStructuredData(front, lang, canonicalUrl) {
     "@context": "https://schema.org",
     "@type": "WebSite",
     name: siteData.title ?? "",
-    description: siteData.description ?? "",
     url: canonicalUrl,
     inLanguage: lang,
+    description: siteData.description ?? "",
     publisher: {
       "@type": "Person",
       name: authorName,
+      url: _cfg.identity.url,
+      sameAs: [
+        _cfg.identity.social.devto,
+        _cfg.identity.social.facebook,
+        _cfg.identity.social.github,
+        _cfg.identity.social.instagram,
+        _cfg.identity.social.linkedin,
+        _cfg.identity.social.mastodon,
+        _cfg.identity.social.medium,
+        _cfg.identity.social.stackoverflow,
+        _cfg.identity.social.substack,
+        _cfg.identity.social.tiktok,
+        _cfg.identity.social.x,
+        _cfg.identity.social.youtube
+      ].filter((i) => i && i.trim().length > 0)
     },
   };
   return serializeForInlineScript(structured);

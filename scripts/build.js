@@ -1143,6 +1143,45 @@ function buildContentComponentContext(frontMatter, lang, dictionary) {
   };
 }
 
+function buildViewPayload({ lang, activeMenuKey, pageMeta, content, dictionary }) {
+  const languageFlags = _i18n.flags(lang);
+  const view = {
+    lang,
+    locale: languageFlags.locale,
+    isEnglish: languageFlags.isEnglish,
+    isTurkish: languageFlags.isTurkish,
+    theme: "light",
+    site: buildSiteData(lang),
+    menu: getMenuData(lang, activeMenuKey),
+    footer: getFooterData(lang),
+    pages: PAGES,
+    i18n: dictionary,
+    i18nInline: _i18n.serialize(),
+    page: pageMeta,
+    content,
+    scripts: {
+      analytics: _analytics.snippets,
+      body: [],
+    },
+  };
+  view.easterEgg = buildEasterEggPayload(view);
+  return view;
+}
+
+async function renderPage({ layoutName, view, front, lang, slug, writeMeta }) {
+  const layoutTemplate = _core.layouts.get(layoutName);
+  const rendered = Mustache.render(layoutTemplate, view, {
+    ..._core.partials.files,
+    ..._core.components.files,
+  });
+  const finalHtml = await transformHtml(rendered);
+  const relativePath = buildOutputPath(front, lang, slug);
+  await writeHtmlFile(relativePath, finalHtml, writeMeta);
+  GENERATED_PAGES.add(toPosixPath(relativePath));
+  registerLegacyPaths(lang, slug);
+  return relativePath;
+}
+
 function renderMarkdownComponents(markdown, context = {}) {
   if (!markdown || typeof markdown !== "string") {
     return { markdown: markdown ?? "", placeholders: [] };
@@ -2022,45 +2061,29 @@ async function buildContentPages() {
 
     const contentHtml = await renderContentTemplate(file.template, hydratedHtml, file.header, file.lang, dictionary);
     const pageMeta = buildPageMeta(file.header, file.lang, file.slug);
-    const layoutTemplate = _core.layouts.get(file.layout);
     const activeMenuKey = resolveActiveMenuKey(file.header);
-    const languageFlags = _i18n.flags(file.lang);
-    const view = {
+    const view = buildViewPayload({
       lang: file.lang,
-      locale: languageFlags.locale,
-      isEnglish: languageFlags.isEnglish,
-      isTurkish: languageFlags.isTurkish,
-      theme: "light",
-      site: buildSiteData(file.lang),
-      menu: getMenuData(file.lang, activeMenuKey),
-      footer: getFooterData(file.lang),
-      pages: PAGES,
-      i18n: dictionary,
-      i18nInline: _i18n.serialize(),
-      page: pageMeta,
+      activeMenuKey,
+      pageMeta,
       content: contentHtml,
-      scripts: {
-        analytics: _analytics.snippets,
-        body: [],
-      },
-    };
-    view.easterEgg = buildEasterEggPayload(view);
-    const rendered = Mustache.render(layoutTemplate, view, {
-      ..._core.partials.files,
-      ..._core.components.files,
+      dictionary,
     });
-    const finalHtml = await transformHtml(rendered);
-    const relativePath = buildOutputPath(file.header, file.lang, file.slug);
-    await writeHtmlFile(relativePath, finalHtml, {
-      action: "BUILD_PAGE",
-      type: file.template,
-      source: file.sourcePath,
+    await renderPage({
+      layoutName: file.layout,
+      view,
+      front: file.header,
       lang: file.lang,
-      template: file.layout,
-      inputBytes: byteLength(file.content),
+      slug: file.slug,
+      writeMeta: {
+        action: "BUILD_PAGE",
+        type: file.template,
+        source: file.sourcePath,
+        lang: file.lang,
+        template: file.layout,
+        inputBytes: byteLength(file.content),
+      },
     });
-    GENERATED_PAGES.add(toPosixPath(relativePath));
-    registerLegacyPaths(file.lang, file.slug);
   }
 
   await buildDynamicCollectionPages();
@@ -2162,47 +2185,31 @@ async function buildPaginatedCollectionPages(options) {
       listing,
     );
     const pageMeta = buildPageMeta(frontForPage, lang, pageSlug);
-    const layoutTemplate = _core.layouts.get(layoutName);
     const activeMenuKey = resolveActiveMenuKey(frontForPage);
-    const languageFlags = _i18n.flags(lang);
-    const view = {
+    const view = buildViewPayload({
       lang,
-      locale: languageFlags.locale,
-      isEnglish: languageFlags.isEnglish,
-      isTurkish: languageFlags.isTurkish,
-      theme: "light",
-      site: buildSiteData(lang),
-      menu: getMenuData(lang, activeMenuKey),
-      footer: getFooterData(lang),
-      pages: PAGES,
-      i18n: dictionary,
-      i18nInline: _i18n.serialize(),
-      page: pageMeta,
+      activeMenuKey,
+      pageMeta,
       content: renderedContent,
-      scripts: {
-        analytics: _analytics.snippets,
-        body: [],
-      },
-    };
-    view.easterEgg = buildEasterEggPayload(view);
-    const rendered = Mustache.render(layoutTemplate, view, {
-      ..._core.partials.files,
-      ..._core.components.files,
+      dictionary,
     });
-    const finalHtml = await transformHtml(rendered);
-    const relativePath = buildOutputPath(frontForPage, lang, pageSlug);
-    await writeHtmlFile(relativePath, finalHtml, {
-      action: "BUILD_COLLECTION",
-      type: templateName,
-      source: sourcePath,
+    await renderPage({
+      layoutName,
+      view,
+      front: frontForPage,
       lang,
-      template: layoutName,
-      items: items.length,
-      page: `${pageIndex}/${totalPages}`,
-      inputBytes: byteLength(renderedContent),
+      slug: pageSlug,
+      writeMeta: {
+        action: "BUILD_COLLECTION",
+        type: templateName,
+        source: sourcePath,
+        lang,
+        template: layoutName,
+        items: items.length,
+        page: `${pageIndex}/${totalPages}`,
+        inputBytes: byteLength(renderedContent),
+      },
     });
-    GENERATED_PAGES.add(toPosixPath(relativePath));
-    registerLegacyPaths(lang, pageSlug);
   }
 }
 
@@ -2374,36 +2381,21 @@ async function buildDynamicCollectionPages() {
         const contentHtml = await renderContentTemplate(templateName, "", front, lang, dictionary);
         const pageMeta = buildPageMeta(front, lang, slug);
         const layoutName = "default";
-        const layoutTemplate = _core.layouts.get(layoutName);
         const activeMenuKey = resolveActiveMenuKey(front);
-        const languageFlags = _i18n.flags(lang);
-        const view = {
+        const view = buildViewPayload({
           lang,
-          locale: languageFlags.locale,
-          isEnglish: languageFlags.isEnglish,
-          isTurkish: languageFlags.isTurkish,
-          theme: "light",
-          site: buildSiteData(lang),
-          menu: getMenuData(lang, activeMenuKey),
-          footer: getFooterData(lang),
-          pages: PAGES,
-          i18n: dictionary,
-          i18nInline: _i18n.serialize(),
-          page: pageMeta,
+          activeMenuKey,
+          pageMeta,
           content: contentHtml,
-          scripts: {
-            analytics: _analytics.snippets,
-            body: [],
-          },
-        };
-        view.easterEgg = buildEasterEggPayload(view);
-        const rendered = Mustache.render(layoutTemplate, view, {
-          ..._core.partials.files,
-          ..._core.components.files,
+          dictionary,
         });
-        const finalHtml = await transformHtml(rendered);
-        const relativePath = buildOutputPath(front, lang, slug);
-        await writeHtmlFile(relativePath, finalHtml, {
+        await renderPage({
+          layoutName,
+          view,
+          front,
+          lang,
+          slug,
+          writeMeta: {
           action: "BUILD_DYNAMIC_COLLECTION",
           type: templateName,
           source: normalizeLogPath(_io.path.combine("collections", configKey)),
@@ -2411,9 +2403,8 @@ async function buildDynamicCollectionPages() {
           template: layoutName,
           items: dedupedItems.length,
           inputBytes: byteLength(contentHtml),
+          },
         });
-        GENERATED_PAGES.add(toPosixPath(relativePath));
-        registerLegacyPaths(lang, slug);
       }
     }
   }

@@ -886,23 +886,39 @@ function buildArticleStructuredData(front, lang, canonicalUrl, ogImageUrl) {
     "@type": "Article",
     headline: front.title ?? "",
     description: front.description ?? "",
-    author: { "@type": "Person", name: authorName },
+    author: {
+      "@type": "Person",
+      name: authorName,
+      url: _cfg.identity.url
+    },
+    publisher: {
+      "@type": "Person",
+      name: authorName,
+      url: _cfg.identity.url
+    },
     inLanguage: lang,
-    mainEntityOfPage: canonicalUrl,
+    mainEntityOfPage: {
+      "@type": "WebPage",
+      "@id": canonicalUrl
+    },
   };
 
   if (front.date) {
-    structured.datePublished = front.date;
+    structured.datePublished = _fmt.lastMod(front.date, front.lang);
   }
+
   if (front.updated) {
-    structured.dateModified = front.updated;
+    structured.dateModified = _fmt.lastMod(front.updated);
   }
+
   if (ogImageUrl) {
     structured.image = [ogImageUrl];
   }
+
   if (articleSection) {
     structured.articleSection = articleSection;
   }
+
   if (keywordsArray.length) {
     structured.keywords = keywordsArray;
   }

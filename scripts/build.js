@@ -828,6 +828,9 @@ function buildPageMeta(front, lang, slug) {
   } else if (templateValue === "page") {
     structuredData = buildWebPageStructuredData(front, lang, canonicalUrl);
   }
+  else {
+    structuredData = buildWebPageStructuredData(front, lang, canonicalUrl);
+  }
 
   const ogType = front.ogType ?? (isArticle ? "article" : "website");
 
@@ -966,15 +969,51 @@ function buildWebPageStructuredData(front, lang, canonicalUrl) {
     : Array.isArray(front.tags) && front.tags.length
       ? front.tags
       : [];
+  const isPolicy = front.category && front.category.trim().length > 0 ? _fmt.boolean(front.category.trim() === "policy") : false;
+  const isAboutPage = front.type && front.type.trim().length > 0 ? _fmt.boolean(front.type.trim() === "about") : false;
+  const isContactPage = front.type && front.type.trim().length > 0 ? _fmt.boolean(front.type.trim() === "contact") : false;
 
   const structured = {
     "@context": "https://schema.org",
-    "@type": "WebPage",
+    "@type": isAboutPage ? "AboutPage" : isContactPage ? "ContactPage" : "WebPage",
     headline: front.title ?? "",
     description: front.description ?? "",
-    author: { "@type": "Person", name: authorName },
+    publisher: {
+      "@type": "Person",
+      name: authorName,
+      url: _cfg.identity.url
+    },
     inLanguage: lang,
-    mainEntityOfPage: canonicalUrl,
+    mainEntityOfPage: {
+      "@type": "WebPage",
+      "@id": canonicalUrl
+    },
+    ...isPolicy ? { about: { "@type": "Thing", name: "Website Legal Information" } } : {},
+    ...isAboutPage ? {
+      about: {
+        "@type": "Person", name: _cfg.identity.author, url: _cfg.identity.url, sameAs: [
+          _cfg.identity.social.devto,
+          _cfg.identity.social.facebook,
+          _cfg.identity.social.github,
+          _cfg.identity.social.instagram,
+          _cfg.identity.social.linkedin,
+          _cfg.identity.social.mastodon,
+          _cfg.identity.social.medium,
+          _cfg.identity.social.stackoverflow,
+          _cfg.identity.social.substack,
+          _cfg.identity.social.tiktok,
+          _cfg.identity.social.x,
+          _cfg.identity.social.youtube
+        ].filter((i) => i && i.trim().length > 0)
+      }
+    } : {},
+    ...isContactPage ? {
+      about: {
+        "@type": "Person", name: _cfg.identity.author, url: _cfg.identity.url
+      },
+      contactPoint: { "@type": "ContactPoint", "contactType": "general inquiry", "email": _cfg.identity.email }
+    } : {}
+
   };
 
   if (keywordsArray.length) {

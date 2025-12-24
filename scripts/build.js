@@ -724,8 +724,9 @@ function buildTagUrlFromLabel(label, lang) {
   return buildTagUrlFromKey(key, lang);
 }
 
-function buildFooterTags(lang, limit = 20) {
+function buildFooterTags(lang) {
   const langCollections = PAGES[lang] ?? {};
+  const limit = _cfg.seo.footerTagCount;
   const results = [];
   Object.keys(langCollections).forEach((key) => {
     const items = langCollections[key] ?? [];
@@ -763,7 +764,7 @@ function buildFooterTags(lang, limit = 20) {
 
 function getFooterData(lang) {
   const policiesSource = FOOTER_POLICIES[lang] ?? FOOTER_POLICIES[_i18n.default] ?? [];
-  const tagsSource = buildFooterTags(lang, 20);
+  const tagsSource = buildFooterTags(lang);
   const social = _social.get().map((item) => {
     let url = item.url;
     if (item.key === "rss") {

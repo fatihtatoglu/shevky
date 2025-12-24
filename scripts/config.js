@@ -5,6 +5,7 @@ import _io from "./io.js";
  * @property {string} defaultImage Absolute or relative fallback image URL.
  * @property {boolean} includeCollections Adds collection listings into SEO metadata.
  * @property {boolean} includePaging Adds pagination references into SEO metadata.
+ * @property {number} footerTagCount Number of tags in footer.
  */
 
 /**
@@ -117,7 +118,8 @@ const FALLBACKS = {
     seo: {
         defaultImage: "",
         includeCollections: false,
-        includePaging: false
+        includePaging: false,
+        footerTagCount: 8
     },
     analytics: {
         enabled: false,

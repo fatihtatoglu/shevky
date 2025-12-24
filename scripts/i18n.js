@@ -2,6 +2,11 @@ import _io from "./io.js";
 import _cfg from "./config.js";
 
 let cache = {};
+const LANGUAGE_LABELS = {
+    tr: "Türkçe",
+    en: "English",
+    de: "Deutsch"
+};
 
 function getLanguageConfig() {
     return _cfg?.content?.languages ?? { default: "tr", supported: ["tr"], canonical: { tr: "/" } };
@@ -231,6 +236,11 @@ function getLanguage(lang) {
     return cache[lang] ?? cache[context.defaultLang] ?? {};
 }
 
+function getLanguageLabel(lang) {
+    const normalized = (lang ?? "").toLowerCase();
+    return LANGUAGE_LABELS[normalized] ?? lang ?? "";
+}
+
 const out = {
     load: loadLanguage,
 
@@ -330,7 +340,9 @@ const out = {
         }, dictionary);
 
         return value;
-    }
+    },
+
+    languageLabel: getLanguageLabel
 };
 
 const API = out;

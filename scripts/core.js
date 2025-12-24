@@ -114,6 +114,9 @@ async function loadFromContentFile(filePath) {
         get date() {
             return data.date;
         },
+        get updated() {
+            return data.updated;
+        },
         get dateDisplay() {
             return _fmt.date(data.date, data.lang);
         },
@@ -153,8 +156,8 @@ async function loadFromContentFile(filePath) {
         get menuOrder() {
             return _fmt.order(data.order);
         },
-        get layout(){
-            return typeof data.layout === "string" ? data.layout.trim() : "default"; 
+        get layout() {
+            return typeof data.layout === "string" ? data.layout.trim() : "default";
         }
     };
 

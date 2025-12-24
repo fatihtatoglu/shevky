@@ -439,9 +439,16 @@ function resolvePaginationSegment(lang) {
 
 function buildAlternateUrlMap(front, lang, canonicalUrl) {
   const overrides = normalizeAlternateOverrides(front?.alternate, lang);
-  const result = {};
+  const result = { base: {} };
 
   _i18n.supported.forEach((code) => {
+    const langConfig = _i18n.build[code];
+    const fallbackPath = code === _i18n.default ? "/" : `/${code}/`;
+    const baseUrl = langConfig?.canonical
+      ? ensureDirectoryTrailingSlash(langConfig.canonical)
+      : resolveUrl(fallbackPath);
+    result.base[code] = baseUrl;
+
     if (code === lang) {
       result[code] = canonicalUrl;
       return;
@@ -452,17 +459,16 @@ function buildAlternateUrlMap(front, lang, canonicalUrl) {
       return;
     }
 
-    const langConfig = _i18n.build[code];
     if (langConfig?.canonical) {
       result[code] = langConfig.canonical;
       return;
     }
 
-    const fallbackPath = code === _i18n.default ? "/" : `/${code}/`;
     result[code] = resolveUrl(fallbackPath);
   });
 
   result.default = canonicalUrl;
+
   return result;
 }
 
@@ -471,10 +477,13 @@ function buildAlternateLinkList(alternateMap) {
     return [];
   }
 
+  const baseMap = alternateMap.base ?? {};
   return _i18n.supported.map((code) => ({
     lang: code,
     hreflang: code,
     url: alternateMap[code] ?? alternateMap.default ?? "",
+    label: _i18n.languageLabel(code),
+    baseUrl: baseMap[code] ?? baseMap[_i18n.default] ?? "",
   }));
 }
 
@@ -632,6 +641,19 @@ function buildSiteData(lang) {
     quote,
     home: resolveLanguageHomePath(lang),
     url: _cfg.identity.url,
+    currentLanguage: lang,
+    currentCulture: _i18n.culture(lang),
+    currentCanonical: (() => {
+      const langConfig = _i18n.build?.[lang];
+      if (langConfig?.canonical) {
+        return langConfig.canonical;
+      }
+      const fallbackPath = lang === _i18n.default ? "/" : `/${lang}/`;
+      return resolveUrl(fallbackPath);
+    })(),
+    currentLangLabel: typeof _i18n.languageLabel === "function"
+      ? _i18n.languageLabel(lang)
+      : lang,
     themeColor: _cfg.identity.themeColor,
     analyticsEnabled: _analytics.enabled,
     gtmId: _analytics.google.gtm,
@@ -639,6 +661,20 @@ function buildSiteData(lang) {
     languages: {
       supported: _i18n.supported,
       default: _i18n.default,
+      canonical: (_cfg?.content?.languages?.canonical && typeof _cfg.content.languages.canonical === "object")
+        ? _cfg.content.languages.canonical
+        : {},
+      canonicalUrl: _i18n.supported.reduce((acc, code) => {
+        const langConfig = _i18n.build?.[code];
+        if (langConfig?.canonical) {
+          acc[code] = langConfig.canonical;
+        }
+        return acc;
+      }, {}),
+      cultures: _i18n.supported.reduce((acc, code) => {
+        acc[code] = _i18n.culture(code);
+        return acc;
+      }, {}),
     },
     languagesCsv: _i18n.supported.join(","),
     defaultLanguage: _i18n.default,
@@ -1622,13 +1658,26 @@ async function collectRssEntriesForLang(lang, limit = 50) {
       continue;
     }
 
+    const categories = [];
+    if (file.category) {
+      categories.push(file.category);
+    }
+    if (Array.isArray(file.tags)) {
+      categories.push(...file.tags);
+    }
+
+    const uniqueCategories = [...new Set(categories.map((category) =>
+      typeof category === "string" ? category.trim() : "",
+    ).filter(Boolean))];
+
     entries.push({
       title: file.title,
       description: file.description,
       link: resolveUrl(file.canonical),
       guid: resolveUrl(file.canonical),
       date: file.date,
-      category: file.category
+      category: file.category,
+      categories: uniqueCategories,
     });
   }
 
@@ -1726,6 +1775,13 @@ async function buildRssFeeds() {
   const email = _cfg.identity.email;
   const authorName = _cfg.identity.author;
   const languages = _i18n.supported.length ? _i18n.supported : [_i18n.default];
+  const feedUrls = languages.reduce((acc, lang) => {
+    const langConfig = _i18n.build[lang] ?? _i18n.build[_i18n.default];
+    const baseUrl = (langConfig?.canonical ?? _cfg.identity.url) || "";
+    const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+    acc[lang] = `${normalizedBase}feed.xml`;
+    return acc;
+  }, {});
 
   for (const lang of languages) {
     const rssEntries = await collectRssEntriesForLang(lang, 50);
@@ -1737,9 +1793,17 @@ async function buildRssFeeds() {
     const siteDescription = _i18n.t(lang, "site.description", "");
     const langConfig = _i18n.build[lang] ?? _i18n.build[_i18n.default];
     const channelLink = langConfig?.canonical ?? _cfg.identity.url;
+    const selfFeedLink = feedUrls[lang] ?? `${channelLink}feed.xml`;
     const languageCulture = _i18n.culture(lang) ?? lang;
     const languageCode = languageCulture.replace("_", "-");
     const lastBuildDate = _fmt.rssDate(new Date());
+    const alternateFeedLinks = languages
+      .filter((alternateLang) => alternateLang !== lang && feedUrls[alternateLang])
+      .map(
+        (alternateLang) =>
+          `    <atom:link href="${_fmt.escape(feedUrls[alternateLang])}" rel="alternate" hreflang="${_fmt.escape(alternateLang)}" type="application/rss+xml" />`,
+      )
+      .join("\n");
 
     const itemsXml = rssEntries
       .map((entry) => {
@@ -1747,10 +1811,17 @@ async function buildRssFeeds() {
         const descriptionCdata = description ? `<![CDATA[ ${description} ]]>` : "";
         const authorField =
           email && authorName ? `${email} (${authorName})` : email || authorName || "";
-        const categoryLine =
-          entry.category && entry.category.length
-            ? `    <category>${_fmt.escape(entry.category)}</category>`
-            : "";
+        const categories = [];
+        if (entry.category) {
+          categories.push(entry.category);
+        }
+
+        const categoryLines = [...new Set(categories.map((category) =>
+          typeof category === "string" ? category.trim() : "",
+        ).filter(Boolean))]
+          .map((category) => `    <category>${_fmt.escape(category)}</category>`)
+          .join("\n");
+
         return [
           "  <item>",
           `    <title>${_fmt.escape(entry.title)}</title>`,
@@ -1759,7 +1830,7 @@ async function buildRssFeeds() {
           entry.date ? `    <pubDate>${_fmt.rssDate(entry.date)}</pubDate>` : "",
           descriptionCdata ? `    <description>${descriptionCdata}</description>` : "",
           authorField ? `    <author>${_fmt.escape(authorField)}</author>` : "",
-          categoryLine,
+          categoryLines,
           "  </item>",
         ]
           .filter(Boolean)
@@ -1770,13 +1841,18 @@ async function buildRssFeeds() {
     const rssXml = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<?xml-stylesheet type="text/xsl" href="/assets/rss.xsl"?>',
-      '<rss version="2.0">',
+      '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">',
       "  <channel>",
       `    <title>${_fmt.escape(siteTitle)}</title>`,
       `    <link>${_fmt.escape(channelLink)}</link>`,
+      `    <atom:link href="${_fmt.escape(selfFeedLink)}" rel="self" type="application/rss+xml" />`,
+      ...(alternateFeedLinks ? [alternateFeedLinks] : []),
       `    <description>${_fmt.escape(siteDescription)}</description>`,
       `    <language>${_fmt.escape(languageCode)}</language>`,
       `    <lastBuildDate>${lastBuildDate}</lastBuildDate>`,
+      `    <generator>Shevky Static Site Generator</generator>`,
+      `    <managingEditor>${_cfg.identity.email} (${_cfg.identity.author})</managingEditor>`,
+      `    <ttl>1440</ttl>`,
       itemsXml,
       "  </channel>",
       "</rss>",
@@ -1795,39 +1871,10 @@ async function buildRssFeeds() {
   }
 }
 
-async function collectSitemapEntriesFromFeeds() {
-  const urls = [];
-  const languages = _i18n.supported.length ? _i18n.supported : [_i18n.default];
-
-  for (const lang of languages) {
-    const rssEntries = await collectRssEntriesForLang(lang, 1);
-    if (!rssEntries.length) {
-      return;
-    }
-
-    const latest = rssEntries[0];
-    const relativeUrl = lang === _i18n.default ? "/feed.xml" : `/${lang}/feed.xml`;
-    const lastmod = latest?.date ? _fmt.lastMod(latest.date) : null;
-
-    urls.push({
-      loc: resolveUrl(relativeUrl),
-      ...(lastmod ? { lastmod } : {}),
-    });
-  }
-
-  return urls;
-}
-
 async function buildSitemap() {
   const contentEntries = await collectSitemapEntriesFromContent();
   const collectionEntries = SEO_INCLUDE_COLLECTIONS ? collectSitemapEntriesFromDynamicCollections() : [];
-
-  let feedEntries = await collectSitemapEntriesFromFeeds();
-  if (!feedEntries) {
-    feedEntries = [];
-  }
-
-  const combined = [...contentEntries, ...collectionEntries, ...feedEntries];
+  const combined = [...contentEntries, ...collectionEntries];
   if (!combined.length) {
     return;
   }
@@ -1948,15 +1995,15 @@ function collectSitemapEntriesFromDynamicCollections() {
         let latestTimestamp = null;
         items.forEach((item) => {
           if (!item || !item.date) return;
-          const ts = Date.parse(item.date);
+          const ts = Date.parse(item.updated);
           if (!Number.isNaN(ts)) {
             if (latestTimestamp == null || ts > latestTimestamp) {
               latestTimestamp = ts;
             }
           }
         });
-        const lastmod =
-          latestTimestamp != null ? _fmt.lastMod(new Date(latestTimestamp)) : null;
+
+        const lastmod = latestTimestamp != null ? _fmt.lastMod(new Date(latestTimestamp)) : new Date().toISOString();
 
         urls.push({
           loc: absoluteLoc,

@@ -2286,8 +2286,6 @@ async function buildDynamicCollectionPages() {
 
   const configKeys = Object.keys(COLLECTION_CONFIG);
   for (const configKey of configKeys) {
-    console.log("[Derin] configKey", configKey);
-
     const config = COLLECTION_CONFIG[configKey];
     if (!config || typeof config !== "object") {
       continue;
@@ -2323,9 +2321,6 @@ async function buildDynamicCollectionPages() {
 
       const collectionKeys = Object.keys(langCollections);
       for (const key of collectionKeys) {
-
-        console.log("[Derin] key", key);
-
         const items = langCollections[key] ?? [];
         if (!Array.isArray(items) || items.length === 0) {
           continue;
@@ -2412,10 +2407,7 @@ async function buildDynamicCollectionPages() {
         }
 
         const contentHtml = await renderContentTemplate(templateName, "", front, lang, dictionary);
-
-        console.log("[Derin] front:", front);
         const pageMeta = buildPageMeta(front, lang, slug);
-
         const layoutName = "default";
         const activeMenuKey = resolveActiveMenuKey(front);
         const view = buildViewPayload({

@@ -120,9 +120,11 @@ function byteLength(input) {
   if (input === undefined || input === null) {
     return 0;
   }
+
   if (typeof input !== "string") {
     return Buffer.byteLength(String(input));
   }
+
   return Buffer.byteLength(input);
 }
 
@@ -130,13 +132,16 @@ function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "0B";
   }
+
   const units = ["B", "KB", "MB", "GB"];
   let value = bytes;
   let unitIndex = 0;
+
   while (value >= 1024 && unitIndex < units.length - 1) {
     value /= 1024;
     unitIndex += 1;
   }
+
   const precision = unitIndex === 0 ? 0 : 2;
   return `${value.toFixed(precision)}${units[unitIndex]}`;
 }
@@ -145,10 +150,12 @@ function normalizeLogPath(pathValue) {
   if (!pathValue) {
     return "";
   }
+
   const normalized = toPosixPath(pathValue);
   if (normalized.startsWith("./")) {
     return normalized.slice(2);
   }
+
   return normalized;
 }
 
@@ -156,17 +163,20 @@ function previewList(values, limit = 5) {
   if (!Array.isArray(values) || values.length === 0) {
     return undefined;
   }
+
   const normalized = values
     .map((value) => (value == null ? "" : String(value).trim()))
     .filter((value) => value.length > 0);
   if (!normalized.length) {
     return undefined;
   }
+
   const slice = normalized.slice(0, limit);
   const extra = normalized.length - slice.length;
   if (extra > 0) {
     return `${slice.join(", ")} +${extra}`;
   }
+
   return slice.join(", ");
 }
 
@@ -174,6 +184,7 @@ function describeContentEntry(file) {
   if (!file || typeof file !== "object") {
     return "";
   }
+
   return (
     (typeof file.id === "string" && file.id.trim()) ||
     (typeof file.slug === "string" && file.slug.trim()) ||
@@ -238,12 +249,16 @@ async function buildJs() {
   const args = [
     "esbuild",
     sourePath,
-    "--bundle", "--format=esm", "--target=es2018", "--sourcemap",
+    "--bundle", "--format=esm", "--target=es2018",
     "--outfile=" + distPath,
   ];
 
   if (_cfg.build.minify) {
     args.push("--minify");
+    args.push("--drop:debugger");
+    args.push("--drop:console");
+    args.push("--ignore-annotations");
+    args.push("--sourcemap");
   }
 
   await _npm.executeNpx(args, ROOT_DIR);
@@ -972,12 +987,33 @@ function buildWebPageStructuredData(front, lang, canonicalUrl) {
   const isPolicy = front.category && front.category.trim().length > 0 ? _fmt.boolean(front.category.trim() === "policy") : false;
   const isAboutPage = front.type && front.type.trim().length > 0 ? _fmt.boolean(front.type.trim() === "about") : false;
   const isContactPage = front.type && front.type.trim().length > 0 ? _fmt.boolean(front.type.trim() === "contact") : false;
+  const collectionType = front.collectionType && front.collectionType.trim().length > 0 ? front.collectionType.trim() : "";
+  const isCollectionPage = collectionType === "tag" || collectionType === "category" || collectionType === "series";
+  const socialProfileArray = [
+    _cfg.identity.social.devto,
+    _cfg.identity.social.facebook,
+    _cfg.identity.social.github,
+    _cfg.identity.social.instagram,
+    _cfg.identity.social.linkedin,
+    _cfg.identity.social.mastodon,
+    _cfg.identity.social.medium,
+    _cfg.identity.social.stackoverflow,
+    _cfg.identity.social.substack,
+    _cfg.identity.social.tiktok,
+    _cfg.identity.social.x,
+    _cfg.identity.social.youtube
+  ].filter((i) => i && i.trim().length > 0);
+  const collectionDescription = isCollectionPage ?
+    collectionType === "tag" ? _i18n.t(lang, "seo.collections.tags.description", "").replace("{{label}}", front.listKey) :
+      collectionType === "category" ? _i18n.t(lang, "seo.collections.category.description", "").replace("{{label}}", front.listKey) :
+        collectionType === "series" ? _i18n.t(lang, "seo.collections.series.description", "").replace("{{label}}", front.listKey) :
+          "" : "";
 
   const structured = {
     "@context": "https://schema.org",
-    "@type": isAboutPage ? "AboutPage" : isContactPage ? "ContactPage" : "WebPage",
+    "@type": isAboutPage ? "AboutPage" : isContactPage ? "ContactPage" : isCollectionPage ? "CollectionPage" : "WebPage",
     headline: front.title ?? "",
-    description: front.description ?? "",
+    description: front.description ? front.description : isCollectionPage ? collectionDescription : "",
     publisher: {
       "@type": "Person",
       name: authorName,
@@ -991,20 +1027,7 @@ function buildWebPageStructuredData(front, lang, canonicalUrl) {
     ...isPolicy ? { about: { "@type": "Thing", name: "Website Legal Information" } } : {},
     ...isAboutPage ? {
       about: {
-        "@type": "Person", name: _cfg.identity.author, url: _cfg.identity.url, sameAs: [
-          _cfg.identity.social.devto,
-          _cfg.identity.social.facebook,
-          _cfg.identity.social.github,
-          _cfg.identity.social.instagram,
-          _cfg.identity.social.linkedin,
-          _cfg.identity.social.mastodon,
-          _cfg.identity.social.medium,
-          _cfg.identity.social.stackoverflow,
-          _cfg.identity.social.substack,
-          _cfg.identity.social.tiktok,
-          _cfg.identity.social.x,
-          _cfg.identity.social.youtube
-        ].filter((i) => i && i.trim().length > 0)
+        "@type": "Person", name: _cfg.identity.author, url: _cfg.identity.url, sameAs: socialProfileArray
       }
     } : {},
     ...isContactPage ? {
@@ -1013,11 +1036,10 @@ function buildWebPageStructuredData(front, lang, canonicalUrl) {
       },
       contactPoint: { "@type": "ContactPoint", "contactType": "general inquiry", "email": _cfg.identity.email }
     } : {}
-
   };
 
-  if (keywordsArray.length) {
-    structured.keywords = keywordsArray;
+  if (keywordsArray.filter((i) => i && i.trim().length > 0).length) {
+    structured.keywords = keywordsArray.filter((i) => i && i.trim().length > 0);
   }
 
   return serializeForInlineScript(structured);
@@ -2031,6 +2053,7 @@ async function buildContentPages() {
       template: file.template,
       size: formatBytes(byteLength(file.content)),
     });
+
     const dictionary = _i18n.get(file.lang);
     const componentContext = buildContentComponentContext(file.header, file.lang, dictionary);
     const { markdown: markdownSource, placeholders } = renderMarkdownComponents(file.content, componentContext);
@@ -2069,6 +2092,7 @@ async function buildContentPages() {
       content: contentHtml,
       dictionary,
     });
+
     await renderPage({
       layoutName: file.layout,
       view,
@@ -2172,6 +2196,7 @@ async function buildPaginatedCollectionPages(options) {
       slug: pageSlug,
       canonical,
     };
+
     if (collectionType) {
       frontForPage.collectionType = collectionType;
     }
@@ -2184,6 +2209,7 @@ async function buildPaginatedCollectionPages(options) {
       dictionary,
       listing,
     );
+
     const pageMeta = buildPageMeta(frontForPage, lang, pageSlug);
     const activeMenuKey = resolveActiveMenuKey(frontForPage);
     const view = buildViewPayload({
@@ -2193,6 +2219,7 @@ async function buildPaginatedCollectionPages(options) {
       content: renderedContent,
       dictionary,
     });
+
     await renderPage({
       layoutName,
       view,
@@ -2258,6 +2285,8 @@ async function buildDynamicCollectionPages() {
 
   const configKeys = Object.keys(COLLECTION_CONFIG);
   for (const configKey of configKeys) {
+    console.log("[Derin] configKey", configKey);
+
     const config = COLLECTION_CONFIG[configKey];
     if (!config || typeof config !== "object") {
       continue;
@@ -2289,25 +2318,24 @@ async function buildDynamicCollectionPages() {
       const langCollections = PAGES[lang] ?? {};
       const dictionary = _i18n.get(lang);
       const langSlugPattern = typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
-      const titleSuffix = _i18n.t(
-        lang,
-        `seo.collections.${configKey}.titleSuffix`,
-        "",
-      );
+      const titleSuffix = _i18n.t(lang, `seo.collections.${configKey}.titleSuffix`, "");
 
       const collectionKeys = Object.keys(langCollections);
       for (const key of collectionKeys) {
+
+        console.log("[Derin] key", key);
+
         const items = langCollections[key] ?? [];
         if (!Array.isArray(items) || items.length === 0) {
           continue;
         }
 
-        const hasMatchingType = items.some((entry) => types.includes(entry.type));
-        if (!hasMatchingType) {
+        const typedItems = items.filter((entry) => entry && types.includes(entry.type));
+        if (!typedItems.length) {
           continue;
         }
 
-        const dedupedItems = dedupeCollectionItems(items);
+        const dedupedItems = dedupeCollectionItems(typedItems);
         if (!dedupedItems.length) {
           continue;
         }
@@ -2326,11 +2354,13 @@ async function buildDynamicCollectionPages() {
               if (altLang === lang) {
                 return;
               }
+
               const altKey =
                 typeof pairEntry[altLang] === "string" ? pairEntry[altLang].trim() : "";
               if (!altKey) {
                 return;
               }
+
               const altSlugPattern =
                 typeof slugPattern[altLang] === "string" ? slugPattern[altLang] : null;
               const altSlug =
@@ -2367,11 +2397,13 @@ async function buildDynamicCollectionPages() {
           listKey: key,
           ...(alternate ? { alternate } : {}),
         };
+
         front.listHeading = effectiveTitle;
         if (configKey === "series") {
           front.series = key;
           front.seriesTitle = displayKey;
         }
+
         const fallbackType = normalizeCollectionTypeValue(types.length === 1 ? types[0] : "");
         const resolvedCollectionType = resolveCollectionType(front, dedupedItems, fallbackType);
         if (resolvedCollectionType) {
@@ -2379,7 +2411,10 @@ async function buildDynamicCollectionPages() {
         }
 
         const contentHtml = await renderContentTemplate(templateName, "", front, lang, dictionary);
+
+        console.log("[Derin] front:", front);
         const pageMeta = buildPageMeta(front, lang, slug);
+
         const layoutName = "default";
         const activeMenuKey = resolveActiveMenuKey(front);
         const view = buildViewPayload({
@@ -2389,6 +2424,7 @@ async function buildDynamicCollectionPages() {
           content: contentHtml,
           dictionary,
         });
+
         await renderPage({
           layoutName,
           view,
@@ -2396,13 +2432,13 @@ async function buildDynamicCollectionPages() {
           lang,
           slug,
           writeMeta: {
-          action: "BUILD_DYNAMIC_COLLECTION",
-          type: templateName,
-          source: normalizeLogPath(_io.path.combine("collections", configKey)),
-          lang,
-          template: layoutName,
-          items: dedupedItems.length,
-          inputBytes: byteLength(contentHtml),
+            action: "BUILD_DYNAMIC_COLLECTION",
+            type: templateName,
+            source: normalizeLogPath(_io.path.combine("collections", configKey)),
+            lang,
+            template: layoutName,
+            items: dedupedItems.length,
+            inputBytes: byteLength(contentHtml),
           },
         });
       }

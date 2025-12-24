@@ -77,9 +77,6 @@ async function loadFromContentFile(filePath) {
         get header() { return data; },
         get content() { return content; },
         get isValid() { return isValid; },
-        get isDraft() {
-            return _fmt.boolean(data.draft);
-        },
         get sourcePath() {
             return filePath;
         },
@@ -164,6 +161,7 @@ async function loadFromContentFile(filePath) {
     return {
         ...item,
         get isPublished() { return item.status === "published"; },
+        get isDraft() { return item.status === "draft"; },
         get isPostTemplate() { return item.template === "post"; },
         /** @returns {ContentSummary} */
         get summary() {

@@ -108,6 +108,7 @@ import _io from "./io.js";
  * @property {BuildConfig} build Build pipeline flags.
  * @property {IdentityConfig} identity Identity metadata.
  * @property {RobotsConfig} robots Robots.txt directives.
+ * @property {string[]} plugins Plugin package list.
  */
 
 /** @type {Partial<EnginaerConfig>} */
@@ -194,7 +195,8 @@ const FALLBACKS = {
     robots: {
         allow: ["/"],
         disallow: []
-    }
+    },
+    plugins: []
 }
 
 async function loadConfig(path) {
@@ -245,6 +247,9 @@ const API = {
     },
     get robots() {
         return resolveConfig("robots");
+    },
+    get plugins() {
+        return Array.isArray(cache.plugins) ? cache.plugins : [];
     }
 };
 

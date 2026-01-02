@@ -16,6 +16,7 @@ import _fmt from "./format.js";
 import _analytics from "./analytics.js";
 import _core from "./core.js";
 import _social from "./social.js";
+import _plugin from "./plugin.js";
 
 const __dirname = _io.path.name(".");
 const ROOT_DIR = _io.path.combine(__dirname,);
@@ -68,6 +69,8 @@ _log.step("TEMPLATES_READY", {
   total: templateKeys.length,
   sample: previewList(templateKeys, 8),
 });
+
+await _plugin.load();
 
 const versionToken = crypto.randomBytes(6).toString("hex");
 const SEO_INCLUDE_COLLECTIONS = _cfg.seo.includeCollections;

@@ -1,4 +1,6 @@
 import { spawn } from "child_process";
+import { createRequire } from "module";
+import _io from "./io.js";
 
 function getNpmCommand() {
     return process.platform === "win32" ? "npm.cmd" : "npm";
@@ -14,7 +16,7 @@ function getNpxCommand() {
  * @param {string?} cwd 
  * @returns 
  */
-function installPackage(packages, saveDev = false, cwd = process.cwd()) {
+function installPackages(packages, saveDev = false, cwd = process.cwd()) {
     const options = ["install", ...packages];
     if (saveDev) {
         options.push("--save-dev");
@@ -70,13 +72,28 @@ function serve(distPath, port = 3000, cwd = process.cwd()) {
     return runNpx(args, cwd);
 }
 
+function getRequire() {
+    const require = createRequire(import.meta.url);
+    return require;
+}
+
 const API = {
     execute: run,
     executeNpx: runNpx,
     watch,
     serve,
 
-    installPackage
+    installPackages,
+    resolve: function (name) {
+        try {
+            const resolved = getRequire().resolve(name, { paths: [process.cwd()] });
+            return _io.url.toURL(resolved).href;
+        }
+        catch {
+            return null;
+        }
+    }
+
 };
 
 export default API;

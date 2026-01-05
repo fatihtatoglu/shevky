@@ -249,7 +249,8 @@ const API = {
         return resolveConfig("robots");
     },
     get plugins() {
-        return Array.isArray(cache.plugins) ? cache.plugins : [];
+        const value = resolveConfig("plugins");
+        return Array.isArray(value) ? value : [];
     }
 };
 

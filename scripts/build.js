@@ -70,7 +70,7 @@ _log.step("TEMPLATES_READY", {
   sample: previewList(templateKeys, 8),
 });
 
-await _plugin.load();
+await _plugin.load(_cfg.plugins);
 
 const versionToken = crypto.randomBytes(6).toString("hex");
 const SEO_INCLUDE_COLLECTIONS = _cfg.seo.includeCollections;
@@ -2598,9 +2598,25 @@ async function main() {
 
   await buildContentPages();
   await copyHtmlRecursive();
-  await buildRssFeeds();
-  await buildSitemap();
-  await buildRobotsTxt();
+  // await buildRssFeeds();
+  // await buildSitemap();
+  // await buildRobotsTxt();
+  await _plugin.execute(_plugin.hooks.POSTBUILD, {
+    paths: { dist: DIST_DIR },
+    site: {
+      title: _i18n.t(_i18n.default, "site.title", _cfg.identity.author),
+      description: _i18n.t(_i18n.default, "site.description", ""),
+      url: (_i18n.build[_i18n.default]?.canonical ?? _cfg.identity.url) || "",
+      lang: _i18n.default
+    }
+  }, {
+    rss: {
+      title: _i18n.t(_i18n.default, "site.title", _cfg.identity.author),
+      description: _i18n.t(_i18n.default, "site.description", ""),
+      link: (_i18n.build[_i18n.default]?.canonical ?? _cfg.identity.url) || "",
+      items: await collectRssEntriesForLang(_i18n.default, 50)
+    }
+  });
   _log.step("BUILD_DONE", { dist: normalizeLogPath(DIST_DIR) });
 }
 

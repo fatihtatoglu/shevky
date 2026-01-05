@@ -1,6 +1,6 @@
 import fsp from "fs/promises";
 import { dirname, join, sep } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 // ========== Directory Functions ========== //
 async function directoryExists(path) {
@@ -102,7 +102,8 @@ const API = {
         seperator: sep
     },
     url: {
-        toPath: fileURLToPath
+        toPath: fileURLToPath,
+        toURL: pathToFileURL
     }
 };
 

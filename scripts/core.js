@@ -190,16 +190,17 @@ async function loadPartials(directoryPath) {
         return;
     }
 
-    (await _io.directory.read(directoryPath)).forEach(async (entry) => {
+    const entries = await _io.directory.read(directoryPath);
+    for (const entry of entries) {
         if (!entry.startsWith("_") || !entry.endsWith(".mustache")) {
-            return;
+            continue;
         }
 
         const key = `partials/${entry.replace(/\.mustache$/, "")}`;
         const path = _io.path.combine(directoryPath, entry);
 
         container.partials[key] = await _io.file.read(path);
-    });
+    }
 }
 
 /**
@@ -212,16 +213,17 @@ async function loadComponents(directoryPath) {
         return;
     }
 
-    (await _io.directory.read(directoryPath)).forEach(async (entry) => {
+    const entries = await _io.directory.read(directoryPath);
+    for (const entry of entries) {
         if (!entry.endsWith(".mustache")) {
-            return;
+            continue;
         }
 
         const key = `components/${entry.replace(/\.mustache$/, "")}`;
         const path = _io.path.combine(directoryPath, entry);
 
         container.components[key] = await _io.file.read(path);
-    });
+    }
 }
 
 /**
@@ -234,9 +236,10 @@ async function loadLayout(directoryPath) {
         return;
     }
 
-    (await _io.directory.read(directoryPath)).forEach(async (entry) => {
+    const entries = await _io.directory.read(directoryPath);
+    for (const entry of entries) {
         if (entry.startsWith("_") || !entry.endsWith(".mustache")) {
-            return;
+            continue;
         }
 
         const key = `${entry.replace(/\.mustache$/, "")}`;
@@ -244,7 +247,7 @@ async function loadLayout(directoryPath) {
         const layout = await _io.file.read(path);
 
         container.layouts.set(key, layout);
-    });
+    }
 }
 
 /**
@@ -257,13 +260,17 @@ async function loadTemplate(directoryPath) {
         return;
     }
 
-    (await _io.directory.read(directoryPath)).forEach(async (entry) => {
+    const entries = await _io.directory.read(directoryPath);
+    for (const entry of entries) {
+        if (!entry.endsWith(".mustache")) {
+            continue;
+        }
         const key = `${entry.replace(/\.mustache$/, "")}`;
         const path = _io.path.combine(directoryPath, entry);
         const template = await _io.file.read(path);
 
         container.templates.set(key, template);
-    });
+    }
 }
 
 const API = {

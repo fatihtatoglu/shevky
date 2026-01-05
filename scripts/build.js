@@ -1246,31 +1246,39 @@ function renderMarkdownComponents(markdown, context = {}) {
     return { markdown: markdown ?? "", placeholders: [] };
   }
   const placeholders = [];
-  const componentPattern = /{{>\s*components\/([A-Za-z0-9_\-./]+)\s*}}/g;
-  let working = markdown;
+  const baseContext = context ?? {};
+  const writer = new Mustache.Writer();
+  const originalRenderPartial = writer.renderPartial;
 
-  working = working.replace(componentPattern, (_, componentName) => {
-    const partialKey = componentName.startsWith("components/")
-      ? componentName
-      : `components/${componentName}`;
-    const template = _core.components.files[partialKey];
-    if (!template) return "";
-    const tokenId = `COMPONENT_SLOT_${placeholders.length}_${componentName.replace(/[^A-Za-z0-9_-]/g, "_")}_${crypto.randomBytes(4).toString("hex")}`;
-    const comment = `<!--${tokenId}-->`;
-    const marker = `\n${comment}\n`;
+  writer.renderPartial = function renderPartial(token, tokenContext, partials, config) {
+    const name = token?.[1];
+    if (name?.startsWith("components/")) {
+      const template = _core.components.files[name];
+      if (!template) return "";
+      const tokenId = `COMPONENT_SLOT_${placeholders.length}_${name.replace(/[^A-Za-z0-9_-]/g, "_")}_${crypto
+        .randomBytes(4)
+        .toString("hex")}`;
+      const comment = `<!--${tokenId}-->`;
+      const marker = `\n${comment}\n`;
+      const tags = this.getConfigTags(config);
+      const tokens = this.parse(template, tags);
+      const html = this.renderTokens(tokens, tokenContext, partials, template, config);
+      placeholders.push({ token: tokenId, marker, html });
+      return marker;
+    }
 
-    const html = Mustache.render(template, context, {
-      ..._core.partials.files,
-      ..._core.components.files,
-    });
+    return originalRenderPartial.call(this, token, tokenContext, partials, config);
+  };
 
-    placeholders.push({ token: tokenId, marker, html });
-    return marker;
-  });
-
-  const renderedMarkdown = Mustache.render(working, context, {
+  let renderedMarkdown = writer.render(markdown, baseContext, {
     ..._core.partials.files,
     ..._core.components.files,
+  });
+
+  placeholders.forEach(({ token }) => {
+    const marker = `<!--${token}-->`;
+    const pattern = new RegExp(`^[ \\t]*${escapeRegExp(marker)}[ \\t]*$`, "gm");
+    renderedMarkdown = renderedMarkdown.replace(pattern, marker);
   });
 
   return { markdown: renderedMarkdown, placeholders };
@@ -1285,7 +1293,8 @@ function injectMarkdownComponents(html, placeholders) {
     return html;
   }
   let output = html;
-  placeholders.forEach(({ token, marker, html: snippet }) => {
+  for (let i = placeholders.length - 1; i >= 0; i -= 1) {
+    const { token, marker, html: snippet } = placeholders[i];
     const safeSnippet = snippet ?? "";
     let nextOutput = output;
 
@@ -1300,7 +1309,7 @@ function injectMarkdownComponents(html, placeholders) {
     }
 
     output = nextOutput;
-  });
+  }
   return output;
 }
 

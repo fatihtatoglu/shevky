@@ -108,6 +108,7 @@ import _io from "./io.js";
  * @property {BuildConfig} build Build pipeline flags.
  * @property {IdentityConfig} identity Identity metadata.
  * @property {RobotsConfig} robots Robots.txt directives.
+ * @property {string[]} plugins Plugin package list.
  */
 
 /** @type {Partial<EnginaerConfig>} */
@@ -115,137 +116,141 @@ let cache = {};
 
 /** @type {EnginaerConfig} */
 const FALLBACKS = {
-    seo: {
-        defaultImage: "",
-        includeCollections: false,
-        includePaging: false,
-        footerTagCount: 8
-    },
-    analytics: {
+  seo: {
+    defaultImage: "",
+    includeCollections: false,
+    includePaging: false,
+    footerTagCount: 8,
+  },
+  analytics: {
+    enabled: false,
+    gtmId: "GTM-XXXXXXX",
+    gaId: "G-XXXXXXXXXX",
+    clarityId: "CLARITY-ID",
+    metaPixelId: "META-PIXEL-ID",
+  },
+  features: {
+    postOperations: {
+      enabled: false,
+      like: false,
+      dislike: false,
+      comment: false,
+      share: {
         enabled: false,
-        gtmId: "GTM-XXXXXXX",
-        gaId: "G-XXXXXXXXXX",
-        clarityId: "CLARITY-ID",
-        metaPixelId: "META-PIXEL-ID"
+        whatsapp: false,
+        x: false,
+        linkedin: false,
+        facebook: false,
+        copy: false,
+      },
     },
-    features: {
-        postOperations: {
-            enabled: false,
-            like: false,
-            dislike: false,
-            comment: false,
-            share: {
-                enabled: false,
-                whatsapp: false,
-                x: false,
-                linkedin: false,
-                facebook: false,
-                copy: false
-            }
-        },
-        search: false
+    search: false,
+  },
+  markdown: {
+    highlight: false,
+  },
+  content: {
+    pagination: {
+      pageSize: 10,
+      segment: {
+        tr: "sayfa",
+        en: "page",
+      },
     },
-    markdown: {
-        highlight: false
+    languages: {
+      default: "tr",
+      supported: ["tr", "en"],
+      canonical: {
+        tr: "/",
+        en: "/en/",
+      },
     },
-    content: {
-        pagination: {
-            pageSize: 10,
-            segment: {
-                tr: "sayfa",
-                en: "page"
-            }
-        },
-        languages: {
-            default: "tr",
-            supported: ["tr", "en"],
-            canonical: {
-                tr: "/",
-                en: "/en/"
-            }
-        },
-        collections: {}
+    collections: {},
+  },
+  build: {
+    minify: false,
+    debug: false,
+  },
+  identity: {
+    author: "<name> <surname>",
+    email: "<name>@<surname>.net",
+    url: "http://localhost:3000",
+    themeColor: "#5a8df0",
+    social: {
+      rss: false,
+      github: "",
+      linkedin: "",
+      x: "",
+      facebook: "",
+      instagram: "",
+      youtube: "",
+      tiktok: "",
+      substack: "",
+      medium: "",
+      devto: "",
+      stackoverflow: "",
+      mastodon: "",
     },
-    build: {
-        minify: false,
-        debug: false
-    },
-    identity: {
-        author: "<name> <surname>",
-        email: "<name>@<surname>.net",
-        url: "http://localhost:3000",
-        themeColor: "#5a8df0",
-        social: {
-            rss: false,
-            github: "",
-            linkedin: "",
-            x: "",
-            facebook: "",
-            instagram: "",
-            youtube: "",
-            tiktok: "",
-            substack: "",
-            medium: "",
-            devto: "",
-            stackoverflow: "",
-            mastodon: ""
-        }
-    },
-    robots: {
-        allow: ["/"],
-        disallow: []
-    }
-}
+  },
+  robots: {
+    allow: ["/"],
+    disallow: [],
+  },
+  plugins: [],
+};
 
 async function loadConfig(path) {
-    try {
-        if (!(await _io.file.exists(path))) {
-            return {};
-        }
-
-        const raw = await _io.file.read(path);
-        cache = JSON.parse(raw);
-
-        return cache;
-
-    } catch (error) {
-        console.warn(`Failed to read site config at ${path}:`, error);
-        return {};
+  try {
+    if (!(await _io.file.exists(path))) {
+      return {};
     }
+
+    const raw = await _io.file.read(path);
+    cache = JSON.parse(raw);
+
+    return cache;
+  } catch (error) {
+    console.warn(`Failed to read site config at ${path}:`, error);
+    return {};
+  }
 }
 
 function resolveConfig(section) {
-    return cache[section] ?? FALLBACKS[section];
+  return cache[section] ?? FALLBACKS[section];
 }
 
 /** @type {EnginaerConfig & { load: typeof loadConfig }} */
 const API = {
-    load: loadConfig,
+  load: loadConfig,
 
-    get seo() {
-        return resolveConfig("seo");
-    },
-    get analytics() {
-        return resolveConfig("analytics");
-    },
-    get features() {
-        return resolveConfig("features");
-    },
-    get markdown() {
-        return resolveConfig("markdown");
-    },
-    get content() {
-        return resolveConfig("content");
-    },
-    get build() {
-        return resolveConfig("build");
-    },
-    get identity() {
-        return resolveConfig("identity");
-    },
-    get robots() {
-        return resolveConfig("robots");
-    }
+  get seo() {
+    return resolveConfig("seo");
+  },
+  get analytics() {
+    return resolveConfig("analytics");
+  },
+  get features() {
+    return resolveConfig("features");
+  },
+  get markdown() {
+    return resolveConfig("markdown");
+  },
+  get content() {
+    return resolveConfig("content");
+  },
+  get build() {
+    return resolveConfig("build");
+  },
+  get identity() {
+    return resolveConfig("identity");
+  },
+  get robots() {
+    return resolveConfig("robots");
+  },
+  get plugins() {
+    const value = resolveConfig("plugins");
+    return Array.isArray(value) ? value : [];
+  },
 };
 
 export default API;

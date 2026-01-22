@@ -48,6 +48,9 @@
     "command-line-usage": "^7.0.3",
     "degit": "^2.8.4"
   },
+  "devDependencies": {
+    "shevky-plugin-robots-txt": "/home/fatihtatoglu/workspace/fatihtatoglu/shevky-plugin-robots-txt"
+  },
   "engines": {
     "node": ">=18"
   }

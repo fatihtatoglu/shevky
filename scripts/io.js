@@ -1,109 +1,107 @@
 import fsp from "fs/promises";
 import { dirname, join, sep } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 // ========== Directory Functions ========== //
 async function directoryExists(path) {
-    try {
-        await fsp.access(path);
-        return true;
-    }
-    catch {
-        return false;
-    }
+  try {
+    await fsp.access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readDirectory(path) {
-    return fsp.readdir(path, { recursive: true });
+  return fsp.readdir(path, { recursive: true });
 }
 
 async function copyDirectory(sourcePath, destinationPath) {
-    if (!directoryExists(destinationPath)) {
-        createDirectory(destinationPath);
-    }
+  if (!directoryExists(destinationPath)) {
+    createDirectory(destinationPath);
+  }
 
-    await fsp.cp(sourcePath, destinationPath, { recursive: true });
+  await fsp.cp(sourcePath, destinationPath, { recursive: true });
 }
 
 async function createDirectory(dir) {
-    return await fsp.mkdir(dir, { recursive: true });
+  return await fsp.mkdir(dir, { recursive: true });
 }
 
 async function removeDirectory(path) {
-    await fsp.rm(path, { recursive: true, force: true });
+  await fsp.rm(path, { recursive: true, force: true });
 }
 
 // ========== File Functions ========== //
 async function fileExists(path) {
-    try {
-        await fsp.access(path);
-        return true;
-    }
-    catch {
-        return false;
-    }
+  try {
+    await fsp.access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function readFile(path) {
-    return await fsp.readFile(path, { encoding: "utf8" });
+  return await fsp.readFile(path, { encoding: "utf8" });
 }
 
 async function writeFile(path, content) {
-    await fsp.writeFile(path, content, "utf8");
+  await fsp.writeFile(path, content, "utf8");
 }
 
 async function copyFile(sourcePath, destinationPath) {
-    return await fsp.cp(sourcePath, destinationPath, { force: true });
+  return await fsp.cp(sourcePath, destinationPath, { force: true });
 }
 
 async function statFile(path) {
-    try {
-        return await fsp.stat(path);
-    }
-    catch {
-        return null;
-    }
+  try {
+    return await fsp.stat(path);
+  } catch {
+    return null;
+  }
 }
 
 async function fileSize(path) {
-    const stats = await statFile(path);
-    return stats?.size ?? 0;
+  const stats = await statFile(path);
+  return stats?.size ?? 0;
 }
 
 // ========== Path Functions ========== //
 function getDirectoryName(path) {
-    return dirname(path);
+  return dirname(path);
 }
 
 function combinePaths(...paths) {
-    return join(...paths);
+  return join(...paths);
 }
 
 // ========== API Definition ========== //
 const API = {
-    directory: {
-        exists: directoryExists,
-        read: readDirectory,
-        copy: copyDirectory,
-        create: createDirectory,
-        remove: removeDirectory
-    },
-    file: {
-        exists: fileExists,
-        read: readFile,
-        write: writeFile,
-        copy: copyFile,
-        stat: statFile,
-        size: fileSize
-    },
-    path: {
-        name: getDirectoryName,
-        combine: combinePaths,
-        seperator: sep
-    },
-    url: {
-        toPath: fileURLToPath
-    }
+  directory: {
+    exists: directoryExists,
+    read: readDirectory,
+    copy: copyDirectory,
+    create: createDirectory,
+    remove: removeDirectory,
+  },
+  file: {
+    exists: fileExists,
+    read: readFile,
+    write: writeFile,
+    copy: copyFile,
+    stat: statFile,
+    size: fileSize,
+  },
+  path: {
+    name: getDirectoryName,
+    combine: combinePaths,
+    seperator: sep,
+  },
+  url: {
+    toPath: fileURLToPath,
+    toURL: pathToFileURL,
+  },
 };
 
 export default API;

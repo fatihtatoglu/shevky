@@ -16,9 +16,10 @@ import _fmt from "./format.js";
 import _analytics from "./analytics.js";
 import _core from "./core.js";
 import _social from "./social.js";
+import _plugin from "./plugin.js";
 
 const __dirname = _io.path.name(".");
-const ROOT_DIR = _io.path.combine(__dirname,);
+const ROOT_DIR = _io.path.combine(__dirname);
 const SRC_DIR = _io.path.combine(ROOT_DIR, "src");
 const DIST_DIR = _io.path.combine(ROOT_DIR, "dist");
 const CONTENT_DIR = _io.path.combine(SRC_DIR, "content");
@@ -31,10 +32,19 @@ const I18N_CONFIG_PATH = _io.path.combine(SRC_DIR, "i18n.json");
 
 await _i18n.load(I18N_CONFIG_PATH);
 await _cfg.load(SITE_CONFIG_PATH);
-_log.step("CONFIG_READY", { file: normalizeLogPath(SITE_CONFIG_PATH), debug: _cfg.build.debug ? "on" : "off" });
-_log.step("I18N_READY", { file: normalizeLogPath(I18N_CONFIG_PATH), locales: _i18n.supported.length });
+_log.step("CONFIG_READY", {
+  file: normalizeLogPath(SITE_CONFIG_PATH),
+  debug: _cfg.build.debug ? "on" : "off",
+});
+_log.step("I18N_READY", {
+  file: normalizeLogPath(I18N_CONFIG_PATH),
+  locales: _i18n.supported.length,
+});
 await _core.contents.load(CONTENT_DIR);
-const contentSample = previewList(_core.contents.files.map(describeContentEntry), 8);
+const contentSample = previewList(
+  _core.contents.files.map(describeContentEntry),
+  8,
+);
 _log.step("CONTENT_LOADED", {
   dir: normalizeLogPath(CONTENT_DIR),
   files: _core.contents.count,
@@ -55,29 +65,36 @@ _log.step("COMPONENTS_READY", {
   sample: previewList(componentKeys, 8),
 });
 await _core.layouts.load(LAYOUTS_DIR);
-const layoutNames = typeof _core.layouts.list === "function" ? _core.layouts.list() : [];
+const layoutNames =
+  typeof _core.layouts.list === "function" ? _core.layouts.list() : [];
 _log.step("LAYOUTS_READY", {
   dir: normalizeLogPath(LAYOUTS_DIR),
   total: layoutNames.length,
   sample: previewList(layoutNames, 8),
 });
 await _core.templates.load(TEMPLATES_DIR);
-const templateKeys = typeof _core.templates.list === "function" ? _core.templates.list() : [];
+const templateKeys =
+  typeof _core.templates.list === "function" ? _core.templates.list() : [];
 _log.step("TEMPLATES_READY", {
   dir: normalizeLogPath(TEMPLATES_DIR),
   total: templateKeys.length,
   sample: previewList(templateKeys, 8),
 });
 
+await _plugin.load(_cfg.plugins);
+_log.step("PLUGINS_READY", {
+  plugins: _cfg.plugins,
+});
+
 const versionToken = crypto.randomBytes(6).toString("hex");
 const SEO_INCLUDE_COLLECTIONS = _cfg.seo.includeCollections;
 const DEFAULT_IMAGE = _cfg.seo.defaultImage;
-const FALLBACK_ROLES = { tr: "-", en: "-", };
-const FALLBACK_QUOTES = { tr: "-", en: "-", };
-const FALLBACK_TITLES = { tr: "-", en: "-", };
-const FALLBACK_DESCRIPTIONS = { tr: "-", en: "-", };
+const FALLBACK_ROLES = { tr: "-", en: "-" };
+const FALLBACK_QUOTES = { tr: "-", en: "-" };
+const FALLBACK_TITLES = { tr: "-", en: "-" };
+const FALLBACK_DESCRIPTIONS = { tr: "-", en: "-" };
 const FALLBACK_OWNER = "-";
-const FALLBACK_TAGLINES = { tr: "-", en: "-", };
+const FALLBACK_TAGLINES = { tr: "-", en: "-" };
 const COLLECTION_CONFIG = _cfg.content.collections;
 
 const MENU_ITEMS = await buildMenuItemsFromContent();
@@ -107,9 +124,10 @@ markdownRenderer.code = (token, infostring) => {
     : typeof infostring === "string"
       ? infostring
       : "";
-  const language = (languageSource || "").trim().split(/\s+/)[0]?.toLowerCase() || "text";
+  const language =
+    (languageSource || "").trim().split(/\s+/)[0]?.toLowerCase() || "text";
   const langClass = language ? ` class="language-${language}"` : "";
-  const value = isTokenObject ? token.text ?? "" : token ?? "";
+  const value = isTokenObject ? (token.text ?? "") : (token ?? "");
   const alreadyEscaped = Boolean(isTokenObject && token.escaped);
   const content = alreadyEscaped ? value : _fmt.escape(value);
   return `<pre class="code-block" data-code-language="${language}"><code${langClass}>${content}</code></pre>`;
@@ -206,21 +224,34 @@ async function buildCss() {
   const sourePath = _io.path.combine(SRC_DIR, "css", "app.css");
   const distPath = _io.path.combine(DIST_DIR, "output.css");
   if (!(await _io.file.exists(configPath))) {
-    console.warn(`[build] Skipping CSS pipeline because Tailwind config is missing at ${configPath}. Run 'shevky --init' or create the configuration file manually.`);
-    _log.step("BUILD_CSS_SKIP", { reason: "missing-config", target: normalizeLogPath(configPath) });
+    console.warn(
+      `[build] Skipping CSS pipeline because Tailwind config is missing at ${configPath}. Run 'shevky --init' or create the configuration file manually.`,
+    );
+    _log.step("BUILD_CSS_SKIP", {
+      reason: "missing-config",
+      target: normalizeLogPath(configPath),
+    });
     return;
   }
 
   if (!(await _io.file.exists(sourePath))) {
-    console.warn(`[build] Skipping CSS pipeline because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`);
-    _log.step("BUILD_CSS_SKIP", { reason: "missing-source", source: normalizeLogPath(sourePath) });
+    console.warn(
+      `[build] Skipping CSS pipeline because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`,
+    );
+    _log.step("BUILD_CSS_SKIP", {
+      reason: "missing-source",
+      source: normalizeLogPath(sourePath),
+    });
     return;
   }
   const args = [
     "@tailwindcss/cli",
-    "-c", configPath,
-    "-i", sourePath,
-    "-o", distPath
+    "-c",
+    configPath,
+    "-i",
+    sourePath,
+    "-o",
+    distPath,
   ];
 
   if (_cfg.build.minify) {
@@ -241,15 +272,22 @@ async function buildJs() {
   const distPath = _io.path.combine(DIST_DIR, "output.js");
 
   if (!(await _io.file.exists(sourePath))) {
-    console.warn(`[build] Skipping JS bundling because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`);
-    _log.step("BUILD_JS_SKIP", { reason: "missing-source", source: normalizeLogPath(sourePath) });
+    console.warn(
+      `[build] Skipping JS bundling because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`,
+    );
+    _log.step("BUILD_JS_SKIP", {
+      reason: "missing-source",
+      source: normalizeLogPath(sourePath),
+    });
     return;
   }
 
   const args = [
     "esbuild",
     sourePath,
-    "--bundle", "--format=esm", "--target=es2018",
+    "--bundle",
+    "--format=esm",
+    "--target=es2018",
     "--outfile=" + distPath,
   ];
 
@@ -360,7 +398,8 @@ function injectAlternateLocaleMeta(html, locales) {
         `${indent}<meta property="og:locale:alternate" content="${locale}" data-og-locale-alt />`,
     )
     .join("\n");
-  const anchorPattern = /(<meta property="og:locale" content=".*?" data-og-locale\s*\/?>)/;
+  const anchorPattern =
+    /(<meta property="og:locale" content=".*?" data-og-locale\s*\/?>)/;
 
   if (anchorPattern.test(output)) {
     return output.replace(anchorPattern, `$1\n${tags}`);
@@ -427,10 +466,7 @@ function resolvePaginationSegment(lang) {
   }
 
   const defaultSegment = segmentConfig[_i18n.default];
-  if (
-    typeof defaultSegment === "string" &&
-    defaultSegment.trim().length > 0
-  ) {
+  if (typeof defaultSegment === "string" && defaultSegment.trim().length > 0) {
     return defaultSegment.trim();
   }
 
@@ -509,6 +545,7 @@ async function writeHtmlFile(relativePath, html, meta = {}) {
   const payload = typeof html === "string" ? html : String(html ?? "");
   await _io.file.write(destPath, payload);
   const outputBytes = byteLength(payload);
+
   _log.step(meta.action ?? "WRITE_HTML", {
     target: normalizeLogPath(destPath),
     source: normalizeLogPath(meta.source),
@@ -517,7 +554,10 @@ async function writeHtmlFile(relativePath, html, meta = {}) {
     template: meta.template,
     items: meta.items,
     page: meta.page,
-    input: typeof meta.inputBytes === "number" ? formatBytes(meta.inputBytes) : undefined,
+    input:
+      typeof meta.inputBytes === "number"
+        ? formatBytes(meta.inputBytes)
+        : undefined,
     output: formatBytes(outputBytes),
   });
 }
@@ -532,11 +572,26 @@ function applyLanguageMetadata(html, langKey) {
 
   let output = html
     .replace(/(<html\b[^>]*\slang=")(.*?)"/, `$1${config.langAttr}"`)
-    .replace(/(<meta name="language" content=")(.*?)"/, `$1${config.metaLanguage}"`)
-    .replace(/(<link rel="canonical" href=")(.*?)" data-canonical/, `$1${config.canonical}" data-canonical`)
-    .replace(/(<meta property="og:url" content=")(.*?)" data-og-url/, `$1${config.canonical}" data-og-url`)
-    .replace(/(<meta name="twitter:url" content=")(.*?)" data-twitter-url/, `$1${config.canonical}" data-twitter-url`)
-    .replace(/(<meta property="og:locale" content=")(.*?)" data-og-locale/, `$1${config.ogLocale}" data-og-locale`);
+    .replace(
+      /(<meta name="language" content=")(.*?)"/,
+      `$1${config.metaLanguage}"`,
+    )
+    .replace(
+      /(<link rel="canonical" href=")(.*?)" data-canonical/,
+      `$1${config.canonical}" data-canonical`,
+    )
+    .replace(
+      /(<meta property="og:url" content=")(.*?)" data-og-url/,
+      `$1${config.canonical}" data-og-url`,
+    )
+    .replace(
+      /(<meta name="twitter:url" content=")(.*?)" data-twitter-url/,
+      `$1${config.canonical}" data-twitter-url`,
+    )
+    .replace(
+      /(<meta property="og:locale" content=")(.*?)" data-og-locale/,
+      `$1${config.ogLocale}" data-og-locale`,
+    );
 
   output = injectAlternateLocaleMeta(output, altLocales);
   return output;
@@ -572,7 +627,8 @@ function ensureDirectoryTrailingSlash(input) {
   }
 
   const lastSlashIndex = path.lastIndexOf("/");
-  const lastSegment = lastSlashIndex >= 0 ? path.slice(lastSlashIndex + 1) : path;
+  const lastSegment =
+    lastSlashIndex >= 0 ? path.slice(lastSlashIndex + 1) : path;
 
   if (!lastSegment || lastSegment.includes(".") || lastSegment === "~") {
     return `${path}${query}${hash}`;
@@ -587,7 +643,10 @@ function resolveUrl(value) {
     return ensureDirectoryTrailingSlash(_cfg.identity.url);
   }
 
-  if (trimmedValue.startsWith("http://") || trimmedValue.startsWith("https://")) {
+  if (
+    trimmedValue.startsWith("http://") ||
+    trimmedValue.startsWith("https://")
+  ) {
     return ensureDirectoryTrailingSlash(trimmedValue);
   }
 
@@ -629,7 +688,9 @@ function buildSiteData(lang) {
   const quote = _i18n.t(
     lang,
     "site.quote",
-    FALLBACK_QUOTES[lang] ?? FALLBACK_QUOTES[_i18n.default] ?? FALLBACK_QUOTES.en,
+    FALLBACK_QUOTES[lang] ??
+      FALLBACK_QUOTES[_i18n.default] ??
+      FALLBACK_QUOTES.en,
   );
 
   return {
@@ -651,9 +712,10 @@ function buildSiteData(lang) {
       const fallbackPath = lang === _i18n.default ? "/" : `/${lang}/`;
       return resolveUrl(fallbackPath);
     })(),
-    currentLangLabel: typeof _i18n.languageLabel === "function"
-      ? _i18n.languageLabel(lang)
-      : lang,
+    currentLangLabel:
+      typeof _i18n.languageLabel === "function"
+        ? _i18n.languageLabel(lang)
+        : lang,
     themeColor: _cfg.identity.themeColor,
     analyticsEnabled: _analytics.enabled,
     gtmId: _analytics.google.gtm,
@@ -661,9 +723,11 @@ function buildSiteData(lang) {
     languages: {
       supported: _i18n.supported,
       default: _i18n.default,
-      canonical: (_cfg?.content?.languages?.canonical && typeof _cfg.content.languages.canonical === "object")
-        ? _cfg.content.languages.canonical
-        : {},
+      canonical:
+        _cfg?.content?.languages?.canonical &&
+        typeof _cfg.content.languages.canonical === "object"
+          ? _cfg.content.languages.canonical
+          : {},
       canonicalUrl: _i18n.supported.reduce((acc, code) => {
         const langConfig = _i18n.build?.[code];
         if (langConfig?.canonical) {
@@ -679,11 +743,11 @@ function buildSiteData(lang) {
     languagesCsv: _i18n.supported.join(","),
     defaultLanguage: _i18n.default,
     pagination: {
-      pageSize: _cfg.content.pagination.pageSize
+      pageSize: _cfg.content.pagination.pageSize,
     },
     features: {
       postOperations: _cfg.features.postOperations,
-      search: _cfg.features.search
+      search: _cfg.features.search,
     },
   };
 }
@@ -691,13 +755,15 @@ function buildSiteData(lang) {
 function getMenuData(lang, activeKey) {
   const baseItems = MENU_ITEMS[lang] ?? MENU_ITEMS[_i18n.default] ?? [];
   const normalizedActiveKey =
-    typeof activeKey === "string" && activeKey.trim().length > 0 ? activeKey.trim() : null;
+    typeof activeKey === "string" && activeKey.trim().length > 0
+      ? activeKey.trim()
+      : null;
   const hasExplicitMatch = normalizedActiveKey
     ? baseItems.some((item) => item.key === normalizedActiveKey)
     : false;
   const resolvedActiveKey = hasExplicitMatch
     ? normalizedActiveKey
-    : baseItems[0]?.key ?? "";
+    : (baseItems[0]?.key ?? "");
   const items = baseItems.map((item) => ({
     ...item,
     label: _i18n.t(lang, `menu.${item.key}`, item.label ?? item.key),
@@ -711,7 +777,10 @@ function resolveActiveMenuKey(frontMatter) {
   if (typeof frontMatter.id === "string" && frontMatter.id.trim().length > 0) {
     return frontMatter.id.trim();
   }
-  if (typeof frontMatter.slug === "string" && frontMatter.slug.trim().length > 0) {
+  if (
+    typeof frontMatter.slug === "string" &&
+    frontMatter.slug.trim().length > 0
+  ) {
     return frontMatter.slug.trim();
   }
   return null;
@@ -724,11 +793,16 @@ function buildTagSlug(key, lang) {
 
   const tagsConfig = _cfg.content.collections.tags;
   const slugPattern =
-    tagsConfig && typeof tagsConfig.slugPattern === "object" ? tagsConfig.slugPattern : {};
+    tagsConfig && typeof tagsConfig.slugPattern === "object"
+      ? tagsConfig.slugPattern
+      : {};
 
-  const langPattern = typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
+  const langPattern =
+    typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
   if (langPattern) {
-    return langPattern.includes("{{key}}") ? langPattern.replace("{{key}}", key) : langPattern;
+    return langPattern.includes("{{key}}")
+      ? langPattern.replace("{{key}}", key)
+      : langPattern;
   }
 
   if (lang === "en") {
@@ -799,7 +873,8 @@ function buildFooterTags(lang) {
 }
 
 function getFooterData(lang) {
-  const policiesSource = FOOTER_POLICIES[lang] ?? FOOTER_POLICIES[_i18n.default] ?? [];
+  const policiesSource =
+    FOOTER_POLICIES[lang] ?? FOOTER_POLICIES[_i18n.default] ?? [];
   const tagsSource = buildFooterTags(lang);
   const social = _social.get().map((item) => {
     let url = item.url;
@@ -822,13 +897,19 @@ function getFooterData(lang) {
 
   const policies = policiesSource.map((policy) => ({
     ...policy,
-    label: _i18n.t(lang, `footer.policies.${policy.key}`, policy.label ?? policy.key),
+    label: _i18n.t(
+      lang,
+      `footer.policies.${policy.key}`,
+      policy.label ?? policy.key,
+    ),
   }));
 
   const tagline = _i18n.t(
     lang,
     "footer.tagline",
-    FALLBACK_TAGLINES[lang] ?? FALLBACK_TAGLINES[_i18n.default] ?? FALLBACK_TAGLINES.en,
+    FALLBACK_TAGLINES[lang] ??
+      FALLBACK_TAGLINES[_i18n.default] ??
+      FALLBACK_TAGLINES.en,
   );
 
   return {
@@ -840,7 +921,9 @@ function getFooterData(lang) {
 }
 
 function buildPageMeta(front, lang, slug) {
-  const canonicalUrl = resolveUrl(front.canonical ?? defaultCanonical(lang, slug));
+  const canonicalUrl = resolveUrl(
+    front.canonical ?? defaultCanonical(lang, slug),
+  );
   const langConfig = _i18n.build[lang] ?? {};
   const pageTitleSource =
     typeof front.metaTitle === "string" && front.metaTitle.trim().length > 0
@@ -854,7 +937,10 @@ function buildPageMeta(front, lang, slug) {
     _i18n.supported
       .filter((code) => code !== lang)
       .map((code) => _i18n.culture(code));
-  const altLocales = normalizeAlternateLocales(front.ogAltLocale, defaultAltLocales);
+  const altLocales = normalizeAlternateLocales(
+    front.ogAltLocale,
+    defaultAltLocales,
+  );
   const coverSource =
     typeof front.cover === "string" && front.cover.trim().length > 0
       ? front.cover.trim()
@@ -864,8 +950,12 @@ function buildPageMeta(front, lang, slug) {
   const alternateLinks = buildAlternateLinkList(alternates);
   const twitterImage = resolveUrl(coverSource);
 
-  const typeValue = typeof front.type === "string" ? front.type.trim().toLowerCase() : "";
-  const templateValue = typeof front.template === "string" ? front.template.trim().toLowerCase() : "";
+  const typeValue =
+    typeof front.type === "string" ? front.type.trim().toLowerCase() : "";
+  const templateValue =
+    typeof front.template === "string"
+      ? front.template.trim().toLowerCase()
+      : "";
   const isArticle =
     templateValue === "post" ||
     typeValue === "article" ||
@@ -874,13 +964,17 @@ function buildPageMeta(front, lang, slug) {
 
   let structuredData = null;
   if (isArticle) {
-    structuredData = buildArticleStructuredData(front, lang, canonicalUrl, ogImage);
+    structuredData = buildArticleStructuredData(
+      front,
+      lang,
+      canonicalUrl,
+      ogImage,
+    );
   } else if (templateValue === "home") {
     structuredData = buildHomeStructuredData(front, lang, canonicalUrl);
   } else if (templateValue === "page") {
     structuredData = buildWebPageStructuredData(front, lang, canonicalUrl);
-  }
-  else {
+  } else {
     structuredData = buildWebPageStructuredData(front, lang, canonicalUrl);
   }
 
@@ -914,7 +1008,10 @@ function buildPageMeta(front, lang, slug) {
 }
 
 function resolveArticleSection(front, lang) {
-  const rawCategory = typeof front.category === "string" ? front.category.trim().toLowerCase() : "";
+  const rawCategory =
+    typeof front.category === "string"
+      ? front.category.trim().toLowerCase()
+      : "";
   if (!rawCategory) return "";
   if (lang === "tr") {
     if (rawCategory === "yasam-ogrenme") return "Yaşam & Öğrenme";
@@ -930,11 +1027,12 @@ function resolveArticleSection(front, lang) {
 function buildArticleStructuredData(front, lang, canonicalUrl, ogImageUrl) {
   const authorName = _cfg.identity.author;
   const articleSection = resolveArticleSection(front, lang);
-  const keywordsArray = Array.isArray(front.keywords) && front.keywords.length
-    ? front.keywords
-    : Array.isArray(front.tags) && front.tags.length
-      ? front.tags
-      : [];
+  const keywordsArray =
+    Array.isArray(front.keywords) && front.keywords.length
+      ? front.keywords
+      : Array.isArray(front.tags) && front.tags.length
+        ? front.tags
+        : [];
 
   const structured = {
     "@context": "https://schema.org",
@@ -944,17 +1042,17 @@ function buildArticleStructuredData(front, lang, canonicalUrl, ogImageUrl) {
     author: {
       "@type": "Person",
       name: authorName,
-      url: _cfg.identity.url
+      url: _cfg.identity.url,
     },
     publisher: {
       "@type": "Person",
       name: authorName,
-      url: _cfg.identity.url
+      url: _cfg.identity.url,
     },
     inLanguage: lang,
     mainEntityOfPage: {
       "@type": "WebPage",
-      "@id": canonicalUrl
+      "@id": canonicalUrl,
     },
   };
 
@@ -1007,8 +1105,8 @@ function buildHomeStructuredData(front, lang, canonicalUrl) {
         _cfg.identity.social.substack,
         _cfg.identity.social.tiktok,
         _cfg.identity.social.x,
-        _cfg.identity.social.youtube
-      ].filter((i) => i && i.trim().length > 0)
+        _cfg.identity.social.youtube,
+      ].filter((i) => i && i.trim().length > 0),
     },
   };
   return serializeForInlineScript(structured);
@@ -1016,16 +1114,32 @@ function buildHomeStructuredData(front, lang, canonicalUrl) {
 
 function buildWebPageStructuredData(front, lang, canonicalUrl) {
   const authorName = _cfg.identity.author;
-  const keywordsArray = Array.isArray(front.keywords) && front.keywords.length
-    ? front.keywords
-    : Array.isArray(front.tags) && front.tags.length
-      ? front.tags
-      : [];
-  const isPolicy = front.category && front.category.trim().length > 0 ? _fmt.boolean(front.category.trim() === "policy") : false;
-  const isAboutPage = front.type && front.type.trim().length > 0 ? _fmt.boolean(front.type.trim() === "about") : false;
-  const isContactPage = front.type && front.type.trim().length > 0 ? _fmt.boolean(front.type.trim() === "contact") : false;
-  const collectionType = front.collectionType && front.collectionType.trim().length > 0 ? front.collectionType.trim() : "";
-  const isCollectionPage = collectionType === "tag" || collectionType === "category" || collectionType === "series";
+  const keywordsArray =
+    Array.isArray(front.keywords) && front.keywords.length
+      ? front.keywords
+      : Array.isArray(front.tags) && front.tags.length
+        ? front.tags
+        : [];
+  const isPolicy =
+    front.category && front.category.trim().length > 0
+      ? _fmt.boolean(front.category.trim() === "policy")
+      : false;
+  const isAboutPage =
+    front.type && front.type.trim().length > 0
+      ? _fmt.boolean(front.type.trim() === "about")
+      : false;
+  const isContactPage =
+    front.type && front.type.trim().length > 0
+      ? _fmt.boolean(front.type.trim() === "contact")
+      : false;
+  const collectionType =
+    front.collectionType && front.collectionType.trim().length > 0
+      ? front.collectionType.trim()
+      : "";
+  const isCollectionPage =
+    collectionType === "tag" ||
+    collectionType === "category" ||
+    collectionType === "series";
   const socialProfileArray = [
     _cfg.identity.social.devto,
     _cfg.identity.social.facebook,
@@ -1038,41 +1152,76 @@ function buildWebPageStructuredData(front, lang, canonicalUrl) {
     _cfg.identity.social.substack,
     _cfg.identity.social.tiktok,
     _cfg.identity.social.x,
-    _cfg.identity.social.youtube
+    _cfg.identity.social.youtube,
   ].filter((i) => i && i.trim().length > 0);
-  const collectionDescription = isCollectionPage ?
-    collectionType === "tag" ? _i18n.t(lang, "seo.collections.tags.description", "").replace("{{label}}", front.listKey) :
-      collectionType === "category" ? _i18n.t(lang, "seo.collections.category.description", "").replace("{{label}}", front.listKey) :
-        collectionType === "series" ? _i18n.t(lang, "seo.collections.series.description", "").replace("{{label}}", front.listKey) :
-          "" : "";
+  const collectionDescription = isCollectionPage
+    ? collectionType === "tag"
+      ? _i18n
+          .t(lang, "seo.collections.tags.description", "")
+          .replace("{{label}}", front.listKey)
+      : collectionType === "category"
+        ? _i18n
+            .t(lang, "seo.collections.category.description", "")
+            .replace("{{label}}", front.listKey)
+        : collectionType === "series"
+          ? _i18n
+              .t(lang, "seo.collections.series.description", "")
+              .replace("{{label}}", front.listKey)
+          : ""
+    : "";
 
   const structured = {
     "@context": "https://schema.org",
-    "@type": isAboutPage ? "AboutPage" : isContactPage ? "ContactPage" : isCollectionPage ? "CollectionPage" : "WebPage",
+    "@type": isAboutPage
+      ? "AboutPage"
+      : isContactPage
+        ? "ContactPage"
+        : isCollectionPage
+          ? "CollectionPage"
+          : "WebPage",
     headline: front.title ?? "",
-    description: front.description ? front.description : isCollectionPage ? collectionDescription : "",
+    description: front.description
+      ? front.description
+      : isCollectionPage
+        ? collectionDescription
+        : "",
     publisher: {
       "@type": "Person",
       name: authorName,
-      url: _cfg.identity.url
+      url: _cfg.identity.url,
     },
     inLanguage: lang,
     mainEntityOfPage: {
       "@type": "WebPage",
-      "@id": canonicalUrl
+      "@id": canonicalUrl,
     },
-    ...isPolicy ? { about: { "@type": "Thing", name: "Website Legal Information" } } : {},
-    ...isAboutPage ? {
-      about: {
-        "@type": "Person", name: _cfg.identity.author, url: _cfg.identity.url, sameAs: socialProfileArray
-      }
-    } : {},
-    ...isContactPage ? {
-      about: {
-        "@type": "Person", name: _cfg.identity.author, url: _cfg.identity.url
-      },
-      contactPoint: { "@type": "ContactPoint", "contactType": "general inquiry", "email": _cfg.identity.email }
-    } : {}
+    ...(isPolicy
+      ? { about: { "@type": "Thing", name: "Website Legal Information" } }
+      : {}),
+    ...(isAboutPage
+      ? {
+          about: {
+            "@type": "Person",
+            name: _cfg.identity.author,
+            url: _cfg.identity.url,
+            sameAs: socialProfileArray,
+          },
+        }
+      : {}),
+    ...(isContactPage
+      ? {
+          about: {
+            "@type": "Person",
+            name: _cfg.identity.author,
+            url: _cfg.identity.url,
+          },
+          contactPoint: {
+            "@type": "ContactPoint",
+            contactType: "general inquiry",
+            email: _cfg.identity.email,
+          },
+        }
+      : {}),
   };
 
   if (keywordsArray.filter((i) => i && i.trim().length > 0).length) {
@@ -1127,10 +1276,19 @@ function resolveLanguageHomePath(lang) {
   return `/${lang}/`.replace(/\/+/g, "/");
 }
 
-async function renderContentTemplate(templateName, contentHtml, front, lang, dictionary, listingOverride) {
+async function renderContentTemplate(
+  templateName,
+  contentHtml,
+  front,
+  lang,
+  dictionary,
+  listingOverride,
+) {
   const template = _core.templates.get(templateName);
   const normalizedTags = Array.isArray(front.tags)
-    ? front.tags.filter((tag) => typeof tag === "string" && tag.trim().length > 0)
+    ? front.tags.filter(
+        (tag) => typeof tag === "string" && tag.trim().length > 0,
+      )
     : [];
   const tagLinks = normalizedTags
     .map((tag) => {
@@ -1142,7 +1300,9 @@ async function renderContentTemplate(templateName, contentHtml, front, lang, dic
     typeof front.category === "string" && front.category.trim().length > 0
       ? _fmt.slugify(front.category)
       : "";
-  const categoryUrl = categorySlug ? buildContentUrl(null, lang, categorySlug) : null;
+  const categoryUrl = categorySlug
+    ? buildContentUrl(null, lang, categorySlug)
+    : null;
   const resolvedDictionary = dictionary ?? _i18n.get(lang);
   const normalizedFront = {
     ...front,
@@ -1161,30 +1321,37 @@ async function renderContentTemplate(templateName, contentHtml, front, lang, dic
     lang,
   };
   if (front?.collectionType) {
-    normalizedFront.collectionType = normalizeCollectionTypeValue(front.collectionType);
+    normalizedFront.collectionType = normalizeCollectionTypeValue(
+      front.collectionType,
+    );
   }
   normalizedFront.seriesListing = buildSeriesListing(normalizedFront, lang);
-  const listing = listingOverride ?? buildCollectionListing(normalizedFront, lang);
+  const listing =
+    listingOverride ?? buildCollectionListing(normalizedFront, lang);
   const collectionFlags = buildCollectionTypeFlags(
     listing?.type ?? resolveCollectionType(normalizedFront, listing?.items),
   );
   const site = buildSiteData(lang);
   const languageFlags = _i18n.flags(lang);
-  return Mustache.render(template, {
-    content: { html: decorateHtml(contentHtml, templateName) },
-    front: normalizedFront,
-    lang,
-    listing,
-    site,
-    locale: languageFlags.locale,
-    isEnglish: languageFlags.isEnglish,
-    isTurkish: languageFlags.isTurkish,
-    i18n: resolvedDictionary,
-    ...collectionFlags,
-  }, {
-    ..._core.partials.files,
-    ..._core.components.files,
-  });
+  return Mustache.render(
+    template,
+    {
+      content: { html: decorateHtml(contentHtml, templateName) },
+      front: normalizedFront,
+      lang,
+      listing,
+      site,
+      locale: languageFlags.locale,
+      isEnglish: languageFlags.isEnglish,
+      isTurkish: languageFlags.isTurkish,
+      i18n: resolvedDictionary,
+      ...collectionFlags,
+    },
+    {
+      ..._core.partials.files,
+      ..._core.components.files,
+    },
+  );
 }
 
 function buildContentComponentContext(frontMatter, lang, dictionary) {
@@ -1202,7 +1369,13 @@ function buildContentComponentContext(frontMatter, lang, dictionary) {
   };
 }
 
-function buildViewPayload({ lang, activeMenuKey, pageMeta, content, dictionary }) {
+function buildViewPayload({
+  lang,
+  activeMenuKey,
+  pageMeta,
+  content,
+  dictionary,
+}) {
   const languageFlags = _i18n.flags(lang);
   const view = {
     lang,
@@ -1250,7 +1423,12 @@ function renderMarkdownComponents(markdown, context = {}) {
   const writer = new Mustache.Writer();
   const originalRenderPartial = writer.renderPartial;
 
-  writer.renderPartial = function renderPartial(token, tokenContext, partials, config) {
+  writer.renderPartial = function renderPartial(
+    token,
+    tokenContext,
+    partials,
+    config,
+  ) {
     const name = token?.[1];
     if (name?.startsWith("components/")) {
       const template = _core.components.files[name];
@@ -1262,12 +1440,24 @@ function renderMarkdownComponents(markdown, context = {}) {
       const marker = `\n${comment}\n`;
       const tags = this.getConfigTags(config);
       const tokens = this.parse(template, tags);
-      const html = this.renderTokens(tokens, tokenContext, partials, template, config);
+      const html = this.renderTokens(
+        tokens,
+        tokenContext,
+        partials,
+        template,
+        config,
+      );
       placeholders.push({ token: tokenId, marker, html });
       return marker;
     }
 
-    return originalRenderPartial.call(this, token, tokenContext, partials, config);
+    return originalRenderPartial.call(
+      this,
+      token,
+      tokenContext,
+      partials,
+      config,
+    );
   };
 
   let renderedMarkdown = writer.render(markdown, baseContext, {
@@ -1299,7 +1489,10 @@ function injectMarkdownComponents(html, placeholders) {
     let nextOutput = output;
 
     if (token) {
-      const pattern = new RegExp(`(?:<p>)?\\s*<!--${escapeRegExp(token)}-->\\s*(?:</p>)?`, "g");
+      const pattern = new RegExp(
+        `(?:<p>)?\\s*<!--${escapeRegExp(token)}-->\\s*(?:</p>)?`,
+        "g",
+      );
       const replaced = nextOutput.replace(pattern, safeSnippet);
       nextOutput = replaced;
     }
@@ -1349,7 +1542,9 @@ function buildContentUrl(canonical, lang, slug) {
 
     return ensureDirectoryTrailingSlash(trimmedCanonical);
   }
-  const fallback = canonicalToRelativePath(defaultCanonical(normalizedLang, slug));
+  const fallback = canonicalToRelativePath(
+    defaultCanonical(normalizedLang, slug),
+  );
   if (fallback) {
     const normalizedFallback = `/${fallback}`.replace(/\/+/g, "/");
     return ensureDirectoryTrailingSlash(normalizedFallback);
@@ -1371,7 +1566,12 @@ async function buildFooterPoliciesFromContent() {
 
   const policiesByLang = {};
   for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished || file.category !== "policy") {
+    if (
+      !file.isValid ||
+      file.isDraft ||
+      !file.isPublished ||
+      file.category !== "policy"
+    ) {
       continue;
     }
 
@@ -1435,7 +1635,7 @@ async function buildCategoryTagCollections() {
 
     const summary = {
       ...file.summary,
-      canonical: buildContentUrl(file.canonical, file.lang, file.slug)
+      canonical: buildContentUrl(file.canonical, file.lang, file.slug),
     };
     const langStore = pagesByLang[file.lang] ?? (pagesByLang[file.lang] = {});
 
@@ -1452,10 +1652,15 @@ async function buildCategoryTagCollections() {
     }
 
     if (file.series) {
-      addCollectionEntry(langStore, file.series, {
-        ...summary,
-        seriesTitle: file.seriesTitle
-      }, "series");
+      addCollectionEntry(
+        langStore,
+        file.series,
+        {
+          ...summary,
+          seriesTitle: file.seriesTitle,
+        },
+        "series",
+      );
     }
   }
 
@@ -1466,7 +1671,8 @@ function buildCollectionListing(front, lang) {
   const normalizedLang = lang ?? _i18n.default;
   const langCollections = PAGES[normalizedLang] ?? {};
   const key = resolveListingKey(front);
-  const sourceItems = key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
+  const sourceItems =
+    key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
   const items = dedupeCollectionItems(sourceItems);
   const collectionType = resolveCollectionType(front, items);
   const typeFlags = buildCollectionTypeFlags(collectionType);
@@ -1484,11 +1690,13 @@ function buildCollectionListing(front, lang) {
 
 function buildSeriesListing(front, lang) {
   const relatedSource = Array.isArray(front?.related) ? front.related : [];
-  const seriesName = typeof front?.seriesTitle === "string" && front.seriesTitle.trim().length > 0
-    ? front.seriesTitle.trim()
-    : typeof front?.series === "string"
-      ? front.series.trim()
-      : "";
+  const seriesName =
+    typeof front?.seriesTitle === "string" &&
+    front.seriesTitle.trim().length > 0
+      ? front.seriesTitle.trim()
+      : typeof front?.series === "string"
+        ? front.series.trim()
+        : "";
   const currentId = typeof front?.id === "string" ? front.id.trim() : "";
   const items = [];
 
@@ -1510,9 +1718,13 @@ function buildSeriesListing(front, lang) {
     const summaryLang = lang || front?.lang;
     let summary = null;
     if (summaryLookup) {
-      summary = summaryLookup[summaryLang] ?? summaryLookup[front?.lang] ?? Object.values(summaryLookup)[0];
+      summary =
+        summaryLookup[summaryLang] ??
+        summaryLookup[front?.lang] ??
+        Object.values(summaryLookup)[0];
     }
-    const label = summary?.title ?? (isCurrent ? front?.title ?? value : value);
+    const label =
+      summary?.title ?? (isCurrent ? (front?.title ?? value) : value);
     const url = summary?.canonical ?? "";
 
     const hasUrl = typeof url === "string" && url.length > 0;
@@ -1552,7 +1764,8 @@ function resolveCollectionType(front, items, fallback) {
 
   if (Array.isArray(items)) {
     const entryWithType = items.find(
-      (entry) => typeof entry?.type === "string" && entry.type.trim().length > 0,
+      (entry) =>
+        typeof entry?.type === "string" && entry.type.trim().length > 0,
     );
     if (entryWithType) {
       return entryWithType.type.trim().toLowerCase();
@@ -1617,7 +1830,10 @@ function resolveListingEmpty(front, lang) {
 
 function resolveListingHeading(front) {
   if (!front) return "";
-  if (typeof front.listHeading === "string" && front.listHeading.trim().length > 0) {
+  if (
+    typeof front.listHeading === "string" &&
+    front.listHeading.trim().length > 0
+  ) {
     return front.listHeading.trim();
   }
   if (typeof front.title === "string" && front.title.trim().length > 0) {
@@ -1641,16 +1857,14 @@ function sortCollectionEntries(collections) {
   Object.keys(collections).forEach((lang) => {
     sorted[lang] = {};
     Object.keys(collections[lang]).forEach((key) => {
-      sorted[lang][key] = collections[lang][key]
-        .slice()
-        .sort((a, b) => {
-          const aDate = Date.parse(a.date ?? "") || 0;
-          const bDate = Date.parse(b.date ?? "") || 0;
-          if (aDate === bDate) {
-            return (a.title ?? "").localeCompare(b.title ?? "", lang);
-          }
-          return bDate - aDate;
-        });
+      sorted[lang][key] = collections[lang][key].slice().sort((a, b) => {
+        const aDate = Date.parse(a.date ?? "") || 0;
+        const bDate = Date.parse(b.date ?? "") || 0;
+        if (aDate === bDate) {
+          return (a.title ?? "").localeCompare(b.title ?? "", lang);
+        }
+        return bDate - aDate;
+      });
     });
   });
   return sorted;
@@ -1663,7 +1877,13 @@ async function collectRssEntriesForLang(lang, limit = 50) {
 
   const entries = [];
   for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished || !file.isPostTemplate || file.lang !== lang) {
+    if (
+      !file.isValid ||
+      file.isDraft ||
+      !file.isPublished ||
+      !file.isPostTemplate ||
+      file.lang !== lang
+    ) {
       continue;
     }
 
@@ -1675,9 +1895,15 @@ async function collectRssEntriesForLang(lang, limit = 50) {
       categories.push(...file.tags);
     }
 
-    const uniqueCategories = [...new Set(categories.map((category) =>
-      typeof category === "string" ? category.trim() : "",
-    ).filter(Boolean))];
+    const uniqueCategories = [
+      ...new Set(
+        categories
+          .map((category) =>
+            typeof category === "string" ? category.trim() : "",
+          )
+          .filter(Boolean),
+      ),
+    ];
 
     entries.push({
       title: file.title,
@@ -1723,13 +1949,20 @@ async function collectSitemapEntriesFromContent() {
       lastmod: baseLastmod,
     });
 
-    if (_cfg.seo.includePaging && (file.template === "collection" || file.template === "home")) {
+    if (
+      _cfg.seo.includePaging &&
+      (file.template === "collection" || file.template === "home")
+    ) {
       const langCollections = PAGES[file.lang] ?? {};
       const key = resolveListingKey(file.header);
-      const allItems = key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
+      const allItems =
+        key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
       const pageSizeSetting = _cfg.content.pagination.pageSize;
       const pageSize = pageSizeSetting > 0 ? pageSizeSetting : 5;
-      const totalPages = Math.max(1, pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1);
+      const totalPages = Math.max(
+        1,
+        pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1,
+      );
 
       if (totalPages > 1) {
         const segment = resolvePaginationSegment(file.lang);
@@ -1749,7 +1982,9 @@ async function collectSitemapEntriesFromContent() {
           });
         }
         const listingLastmod =
-          latestTimestamp != null ? _fmt.lastMod(new Date(latestTimestamp)) : baseLastmod;
+          latestTimestamp != null
+            ? _fmt.lastMod(new Date(latestTimestamp))
+            : baseLastmod;
 
         for (let pageIndex = 2; pageIndex <= totalPages; pageIndex += 1) {
           const pageSlug = baseSlug
@@ -1757,14 +1992,21 @@ async function collectSitemapEntriesFromContent() {
             : `${segment}-${pageIndex}`;
 
           let canonicalOverride;
-          if (typeof data.canonical === "string" && data.canonical.trim().length > 0) {
+          if (
+            typeof data.canonical === "string" &&
+            data.canonical.trim().length > 0
+          ) {
             const trimmed = data.canonical.trim().replace(/\/+$/, "");
             canonicalOverride = `${trimmed}/${segment}-${pageIndex}/`;
           } else {
             canonicalOverride = undefined;
           }
 
-          const pageCanonical = buildContentUrl(canonicalOverride, file.lang, pageSlug);
+          const pageCanonical = buildContentUrl(
+            canonicalOverride,
+            file.lang,
+            pageSlug,
+          );
           const pageAbsoluteLoc = resolveUrl(pageCanonical);
           urls.push({
             loc: pageAbsoluteLoc,
@@ -1807,7 +2049,9 @@ async function buildRssFeeds() {
     const languageCode = languageCulture.replace("_", "-");
     const lastBuildDate = _fmt.rssDate(new Date());
     const alternateFeedLinks = languages
-      .filter((alternateLang) => alternateLang !== lang && feedUrls[alternateLang])
+      .filter(
+        (alternateLang) => alternateLang !== lang && feedUrls[alternateLang],
+      )
       .map(
         (alternateLang) =>
           `    <atom:link href="${_fmt.escape(feedUrls[alternateLang])}" rel="alternate" hreflang="${_fmt.escape(alternateLang)}" type="application/rss+xml" />`,
@@ -1817,18 +2061,30 @@ async function buildRssFeeds() {
     const itemsXml = rssEntries
       .map((entry) => {
         const description = entry.description ? entry.description.trim() : "";
-        const descriptionCdata = description ? `<![CDATA[ ${description} ]]>` : "";
+        const descriptionCdata = description
+          ? `<![CDATA[ ${description} ]]>`
+          : "";
         const authorField =
-          email && authorName ? `${email} (${authorName})` : email || authorName || "";
+          email && authorName
+            ? `${email} (${authorName})`
+            : email || authorName || "";
         const categories = [];
         if (entry.category) {
           categories.push(entry.category);
         }
 
-        const categoryLines = [...new Set(categories.map((category) =>
-          typeof category === "string" ? category.trim() : "",
-        ).filter(Boolean))]
-          .map((category) => `    <category>${_fmt.escape(category)}</category>`)
+        const categoryLines = [
+          ...new Set(
+            categories
+              .map((category) =>
+                typeof category === "string" ? category.trim() : "",
+              )
+              .filter(Boolean),
+          ),
+        ]
+          .map(
+            (category) => `    <category>${_fmt.escape(category)}</category>`,
+          )
           .join("\n");
 
         return [
@@ -1836,8 +2092,12 @@ async function buildRssFeeds() {
           `    <title>${_fmt.escape(entry.title)}</title>`,
           `    <link>${_fmt.escape(entry.link)}</link>`,
           `    <guid isPermaLink="true">${_fmt.escape(entry.guid)}</guid>`,
-          entry.date ? `    <pubDate>${_fmt.rssDate(entry.date)}</pubDate>` : "",
-          descriptionCdata ? `    <description>${descriptionCdata}</description>` : "",
+          entry.date
+            ? `    <pubDate>${_fmt.rssDate(entry.date)}</pubDate>`
+            : "",
+          descriptionCdata
+            ? `    <description>${descriptionCdata}</description>`
+            : "",
           authorField ? `    <author>${_fmt.escape(authorField)}</author>` : "",
           categoryLines,
           "  </item>",
@@ -1882,7 +2142,9 @@ async function buildRssFeeds() {
 
 async function buildSitemap() {
   const contentEntries = await collectSitemapEntriesFromContent();
-  const collectionEntries = SEO_INCLUDE_COLLECTIONS ? collectSitemapEntriesFromDynamicCollections() : [];
+  const collectionEntries = SEO_INCLUDE_COLLECTIONS
+    ? collectSitemapEntriesFromDynamicCollections()
+    : [];
   const combined = [...contentEntries, ...collectionEntries];
   if (!combined.length) {
     return;
@@ -1900,9 +2162,11 @@ async function buildSitemap() {
     const existingDate = existing.lastmod ? Date.parse(existing.lastmod) : null;
     const incomingDate = entry.lastmod ? Date.parse(entry.lastmod) : null;
     if (
-      incomingDate != null
-      && !Number.isNaN(incomingDate)
-      && (existingDate == null || Number.isNaN(existingDate) || incomingDate > existingDate)
+      incomingDate != null &&
+      !Number.isNaN(incomingDate) &&
+      (existingDate == null ||
+        Number.isNaN(existingDate) ||
+        incomingDate > existingDate)
     ) {
       entryByLoc.set(key, entry);
     }
@@ -1914,10 +2178,7 @@ async function buildSitemap() {
 
   const urlset = entries
     .map((entry) => {
-      const parts = [
-        "  <url>",
-        `    <loc>${_fmt.escape(entry.loc)}</loc>`,
-      ];
+      const parts = ["  <url>", `    <loc>${_fmt.escape(entry.loc)}</loc>`];
       if (entry.lastmod) {
         parts.push(`    <lastmod>${_fmt.escape(entry.lastmod)}</lastmod>`);
       }
@@ -1957,15 +2218,19 @@ function collectSitemapEntriesFromDynamicCollections() {
     }
 
     const slugPattern =
-      config.slugPattern && typeof config.slugPattern === "object" ? config.slugPattern : {};
+      config.slugPattern && typeof config.slugPattern === "object"
+        ? config.slugPattern
+        : {};
 
     const types =
       Array.isArray(config.types) && config.types.length > 0
         ? config.types
-          .map((value) =>
-            normalizeCollectionTypeValue(typeof value === "string" ? value : ""),
-          )
-          .filter((value) => value.length > 0)
+            .map((value) =>
+              normalizeCollectionTypeValue(
+                typeof value === "string" ? value : "",
+              ),
+            )
+            .filter((value) => value.length > 0)
         : null;
 
     if (!types || types.length === 0) {
@@ -1975,7 +2240,8 @@ function collectSitemapEntriesFromDynamicCollections() {
     const languages = Object.keys(PAGES);
     for (const lang of languages) {
       const langCollections = PAGES[lang] ?? {};
-      const langSlugPattern = typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
+      const langSlugPattern =
+        typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
 
       const collectionKeys = Object.keys(langCollections);
       for (const key of collectionKeys) {
@@ -1988,7 +2254,9 @@ function collectSitemapEntriesFromDynamicCollections() {
           continue;
         }
 
-        const hasMatchingType = items.some((entry) => types.includes(normalizeCollectionTypeValue(entry.type)));
+        const hasMatchingType = items.some((entry) =>
+          types.includes(normalizeCollectionTypeValue(entry.type)),
+        );
         if (!hasMatchingType) {
           continue;
         }
@@ -2012,7 +2280,10 @@ function collectSitemapEntriesFromDynamicCollections() {
           }
         });
 
-        const lastmod = latestTimestamp != null ? _fmt.lastMod(new Date(latestTimestamp)) : new Date().toISOString();
+        const lastmod =
+          latestTimestamp != null
+            ? _fmt.lastMod(new Date(latestTimestamp))
+            : new Date().toISOString();
 
         urls.push({
           loc: absoluteLoc,
@@ -2026,36 +2297,36 @@ function collectSitemapEntriesFromDynamicCollections() {
   return urls;
 }
 
-async function buildRobotsTxt() {
-  const base = (_cfg.identity.url).replace(/\/+$/, "");
-  const allowList = _cfg.robots.allow;
-  const disallowList = _cfg.robots.disallow;
+// async function buildRobotsTxt() {
+//   const base = _cfg.identity.url.replace(/\/+$/, "");
+//   const allowList = _cfg.robots.allow;
+//   const disallowList = _cfg.robots.disallow;
 
-  const lines = ["User-agent: *"];
+//   const lines = ["User-agent: *"];
 
-  allowList.forEach((path) => {
-    if (typeof path === "string" && path.trim().length > 0) {
-      lines.push(`Allow: ${path.trim()}`);
-    }
-  });
+//   allowList.forEach((path) => {
+//     if (typeof path === "string" && path.trim().length > 0) {
+//       lines.push(`Allow: ${path.trim()}`);
+//     }
+//   });
 
-  disallowList.forEach((path) => {
-    if (typeof path === "string" && path.trim().length > 0) {
-      lines.push(`Disallow: ${path.trim()}`);
-    }
-  });
+//   disallowList.forEach((path) => {
+//     if (typeof path === "string" && path.trim().length > 0) {
+//       lines.push(`Disallow: ${path.trim()}`);
+//     }
+//   });
 
-  lines.push("");
-  lines.push(`Sitemap: ${base}/sitemap.xml`);
-  lines.push("");
+//   lines.push("");
+//   lines.push(`Sitemap: ${base}/sitemap.xml`);
+//   lines.push("");
 
-  const payload = lines.join("\n");
-  await writeHtmlFile("robots.txt", payload, {
-    action: "BUILD_ROBOTS",
-    type: "text",
-    inputBytes: byteLength(payload),
-  });
-}
+//   const payload = lines.join("\n");
+//   await writeHtmlFile("robots.txt", payload, {
+//     action: "BUILD_ROBOTS",
+//     type: "text",
+//     inputBytes: byteLength(payload),
+//   });
+// }
 
 async function buildMenuItemsFromContent() {
   if (_core.contents.count === 0) {
@@ -2064,7 +2335,12 @@ async function buildMenuItemsFromContent() {
 
   const itemsByLang = {};
   for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished || file.isHiddenOnMenu) {
+    if (
+      !file.isValid ||
+      file.isDraft ||
+      !file.isPublished ||
+      file.isHiddenOnMenu
+    ) {
       continue;
     }
 
@@ -2112,8 +2388,15 @@ async function buildContentPages() {
     });
 
     const dictionary = _i18n.get(file.lang);
-    const componentContext = buildContentComponentContext(file.header, file.lang, dictionary);
-    const { markdown: markdownSource, placeholders } = renderMarkdownComponents(file.content, componentContext);
+    const componentContext = buildContentComponentContext(
+      file.header,
+      file.lang,
+      dictionary,
+    );
+    const { markdown: markdownSource, placeholders } = renderMarkdownComponents(
+      file.content,
+      componentContext,
+    );
     if (placeholders.length > 0) {
       _log.step("COMPONENT_SLOTS", {
         file: normalizeLogPath(file.sourcePath),
@@ -2122,7 +2405,10 @@ async function buildContentPages() {
     }
 
     const markdownHtml = marked.parse(markdownSource ?? "");
-    const hydratedHtml = injectMarkdownComponents(markdownHtml ?? "", placeholders);
+    const hydratedHtml = injectMarkdownComponents(
+      markdownHtml ?? "",
+      placeholders,
+    );
 
     if (file.template === "collection" || file.template === "home") {
       await buildPaginatedCollectionPages({
@@ -2139,7 +2425,13 @@ async function buildContentPages() {
       continue;
     }
 
-    const contentHtml = await renderContentTemplate(file.template, hydratedHtml, file.header, file.lang, dictionary);
+    const contentHtml = await renderContentTemplate(
+      file.template,
+      hydratedHtml,
+      file.header,
+      file.lang,
+      dictionary,
+    );
     const pageMeta = buildPageMeta(file.header, file.lang, file.slug);
     const activeMenuKey = resolveActiveMenuKey(file.header);
     const view = buildViewPayload({
@@ -2184,11 +2476,15 @@ async function buildPaginatedCollectionPages(options) {
 
   const langCollections = PAGES[lang] ?? {};
   const key = resolveListingKey(frontMatter);
-  const sourceItems = key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
+  const sourceItems =
+    key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
   const allItems = dedupeCollectionItems(sourceItems);
   const pageSizeSetting = _cfg.content.pagination.pageSize;
   const pageSize = pageSizeSetting > 0 ? pageSizeSetting : 5;
-  const totalPages = Math.max(1, pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1);
+  const totalPages = Math.max(
+    1,
+    pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1,
+  );
   const emptyMessage = resolveListingEmpty(frontMatter, lang);
   const collectionType = resolveCollectionType(frontMatter, allItems);
   const collectionFlags = buildCollectionTypeFlags(collectionType);
@@ -2219,7 +2515,9 @@ async function buildPaginatedCollectionPages(options) {
           : `${segment}-${pageIndex - 1}`
         : baseSlug;
 
-    const nextSlug = base ? `${base}/${segment}-${pageIndex + 1}` : `${segment}-${pageIndex + 1}`;
+    const nextSlug = base
+      ? `${base}/${segment}-${pageIndex + 1}`
+      : `${segment}-${pageIndex + 1}`;
 
     const listing = {
       key,
@@ -2240,7 +2538,10 @@ async function buildPaginatedCollectionPages(options) {
 
     let canonical = frontMatter.canonical;
     if (pageIndex > 1) {
-      if (typeof frontMatter.canonical === "string" && frontMatter.canonical.trim().length > 0) {
+      if (
+        typeof frontMatter.canonical === "string" &&
+        frontMatter.canonical.trim().length > 0
+      ) {
         const trimmed = frontMatter.canonical.trim().replace(/\/+$/, "");
         canonical = `${trimmed}/${segment}-${pageIndex}/`;
       } else {
@@ -2299,8 +2600,11 @@ async function buildPaginatedCollectionPages(options) {
 
 function resolveCollectionDisplayKey(configKey, defaultKey, items) {
   if (configKey === "series" && Array.isArray(items)) {
-    const entryWithTitle = items.find((entry) =>
-      entry && typeof entry.seriesTitle === "string" && entry.seriesTitle.trim().length > 0,
+    const entryWithTitle = items.find(
+      (entry) =>
+        entry &&
+        typeof entry.seriesTitle === "string" &&
+        entry.seriesTitle.trim().length > 0,
     );
     if (entryWithTitle) {
       return entryWithTitle.seriesTitle.trim();
@@ -2353,15 +2657,17 @@ async function buildDynamicCollectionPages() {
         : "category";
 
     const slugPattern =
-      config.slugPattern && typeof config.slugPattern === "object" ? config.slugPattern : {};
+      config.slugPattern && typeof config.slugPattern === "object"
+        ? config.slugPattern
+        : {};
     const pairs =
       config.pairs && typeof config.pairs === "object" ? config.pairs : null;
 
     const types =
       Array.isArray(config.types) && config.types.length > 0
         ? config.types
-          .map((value) => (typeof value === "string" ? value.trim() : ""))
-          .filter((value) => value.length > 0)
+            .map((value) => (typeof value === "string" ? value.trim() : ""))
+            .filter((value) => value.length > 0)
         : null;
 
     if (!types || types.length === 0) {
@@ -2372,8 +2678,13 @@ async function buildDynamicCollectionPages() {
     for (const lang of languages) {
       const langCollections = PAGES[lang] ?? {};
       const dictionary = _i18n.get(lang);
-      const langSlugPattern = typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
-      const titleSuffix = _i18n.t(lang, `seo.collections.${configKey}.titleSuffix`, "");
+      const langSlugPattern =
+        typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
+      const titleSuffix = _i18n.t(
+        lang,
+        `seo.collections.${configKey}.titleSuffix`,
+        "",
+      );
 
       const collectionKeys = Object.keys(langCollections);
       for (const key of collectionKeys) {
@@ -2382,7 +2693,9 @@ async function buildDynamicCollectionPages() {
           continue;
         }
 
-        const typedItems = items.filter((entry) => entry && types.includes(entry.type));
+        const typedItems = items.filter(
+          (entry) => entry && types.includes(entry.type),
+        );
         if (!typedItems.length) {
           continue;
         }
@@ -2408,13 +2721,17 @@ async function buildDynamicCollectionPages() {
               }
 
               const altKey =
-                typeof pairEntry[altLang] === "string" ? pairEntry[altLang].trim() : "";
+                typeof pairEntry[altLang] === "string"
+                  ? pairEntry[altLang].trim()
+                  : "";
               if (!altKey) {
                 return;
               }
 
               const altSlugPattern =
-                typeof slugPattern[altLang] === "string" ? slugPattern[altLang] : null;
+                typeof slugPattern[altLang] === "string"
+                  ? slugPattern[altLang]
+                  : null;
               const altSlug =
                 altSlugPattern && altSlugPattern.includes("{{key}}")
                   ? altSlugPattern.replace("{{key}}", altKey)
@@ -2428,7 +2745,11 @@ async function buildDynamicCollectionPages() {
           }
         }
 
-        const displayKey = resolveCollectionDisplayKey(configKey, key, dedupedItems);
+        const displayKey = resolveCollectionDisplayKey(
+          configKey,
+          key,
+          dedupedItems,
+        );
         const baseTitle = displayKey;
         const normalizedTitleSuffix =
           typeof titleSuffix === "string" && titleSuffix.trim().length > 0
@@ -2437,10 +2758,7 @@ async function buildDynamicCollectionPages() {
         const effectiveTitle = normalizedTitleSuffix
           ? `${baseTitle} | ${normalizedTitleSuffix}`
           : baseTitle;
-        const frontTitle =
-          configKey === "series"
-            ? displayKey
-            : effectiveTitle;
+        const frontTitle = configKey === "series" ? displayKey : effectiveTitle;
         const front = {
           title: frontTitle,
           metaTitle: effectiveTitle,
@@ -2456,13 +2774,25 @@ async function buildDynamicCollectionPages() {
           front.seriesTitle = displayKey;
         }
 
-        const fallbackType = normalizeCollectionTypeValue(types.length === 1 ? types[0] : "");
-        const resolvedCollectionType = resolveCollectionType(front, dedupedItems, fallbackType);
+        const fallbackType = normalizeCollectionTypeValue(
+          types.length === 1 ? types[0] : "",
+        );
+        const resolvedCollectionType = resolveCollectionType(
+          front,
+          dedupedItems,
+          fallbackType,
+        );
         if (resolvedCollectionType) {
           front.collectionType = resolvedCollectionType;
         }
 
-        const contentHtml = await renderContentTemplate(templateName, "", front, lang, dictionary);
+        const contentHtml = await renderContentTemplate(
+          templateName,
+          "",
+          front,
+          lang,
+          dictionary,
+        );
         const pageMeta = buildPageMeta(front, lang, slug);
         const layoutName = "default";
         const activeMenuKey = resolveActiveMenuKey(front);
@@ -2483,7 +2813,9 @@ async function buildDynamicCollectionPages() {
           writeMeta: {
             action: "BUILD_DYNAMIC_COLLECTION",
             type: templateName,
-            source: normalizeLogPath(_io.path.combine("collections", configKey)),
+            source: normalizeLogPath(
+              _io.path.combine("collections", configKey),
+            ),
             lang,
             template: layoutName,
             items: dedupedItems.length,
@@ -2559,7 +2891,10 @@ async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
 
 async function copyStaticAssets() {
   if (!(await _io.directory.exists(ASSETS_DIR))) {
-    _log.step("ASSETS_SKIP", { reason: "missing", dir: normalizeLogPath(ASSETS_DIR) });
+    _log.step("ASSETS_SKIP", {
+      reason: "missing",
+      dir: normalizeLogPath(ASSETS_DIR),
+    });
     return;
   }
 
@@ -2598,20 +2933,33 @@ async function copyStaticAssets() {
 async function main() {
   _log.step("BUILD_START", { dist: normalizeLogPath(DIST_DIR) });
   await ensureDist();
+
+  // <--- dist:clean
+  await _plugin.execute(
+    _plugin.hooks.DIST_CLEAN,
+    { config: _cfg },
+    { write: writeHtmlFile },
+  );
+  // dist:clean --->
+
+  await copyStaticAssets();
+  // <--- assets:copy
+
+  // assets:copy --->
+
   await buildCss();
   await buildJs();
-  await copyStaticAssets();
 
   await buildContentPages();
   await copyHtmlRecursive();
   await buildRssFeeds();
   await buildSitemap();
-  await buildRobotsTxt();
+  //await buildRobotsTxt();
   _log.step("BUILD_DONE", { dist: normalizeLogPath(DIST_DIR) });
 }
 
 const API = {
-  execute: main
+  execute: main,
 };
 
 export default API;

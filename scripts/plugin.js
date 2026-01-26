@@ -1,19 +1,45 @@
-import _cfg from "./config.js";
-import _npm from "./npm.js";
-import _log from "./log.js";
+import { exec as _exec, log as _log, plugin as _plugin } from "@shevky/base";
+import _prj from "./project.js";
 
+/**
+ * @typedef {Object} PluginInstance
+ * @property {string} name
+ * @property {Record<string, Function>} [hooks]
+ * @property {(config: import("@shevky/base").ConfigApi) => void | Promise<void>} [load]
+ */
+
+/** @type {Map<string, PluginInstance>} */
 const cache = new Map();
 
-const HOOKS = Object.freeze({
-  DIST_CLEAN: "dist:clean",
-  ASSETS_COPY: "assets:copy"
-});
+/**
+ * @param {import("@shevky/base").PluginHook | string} hook
+ * @returns {import("@shevky/base").PluginContext}
+ */
+function _createContext(hook) {
+  const projectPaths = _prj.getPaths(process.cwd());
+  const baseContext = _plugin.createBaseContext();
 
+  return {
+    ...baseContext,
+    paths: projectPaths,
+  };
+}
+
+/**
+ * @param {string[] | undefined | null} names
+ * @returns {Promise<void>}
+ */
 async function loadPlugins(names) {
-  try {
-    const pluginNames = Array.isArray(names) ? names : [];
-    for (const pluginName of pluginNames) {
-      const fromCwd = _npm.resolve(pluginName);
+  const pluginNames = Array.isArray(names) ? names.filter(Boolean) : [];
+  if (!pluginNames.length) {
+    return;
+  }
+
+  const projectPaths = _prj.getPaths(process.cwd());
+  const resolveBase = projectPaths.root;
+  for (const pluginName of pluginNames) {
+    try {
+      const fromCwd = _exec.resolve(pluginName, resolveBase);
       const loaded = fromCwd ? await import(fromCwd) : await import(pluginName);
       const instance = loaded?.default ?? loaded;
 
@@ -22,21 +48,37 @@ async function loadPlugins(names) {
         continue;
       }
 
-      const name = instance.name.trim();
+      const name =
+        typeof instance.name === "string" ? instance.name.trim() : "";
+      if (!name) {
+        _log.warn(`Plugin cannot load correctly. Missing name: ${pluginName}`);
+        continue;
+      }
+
+      if (cache.has(name)) {
+        _log.warn(`Duplicate plugin name detected: ${name}`);
+        continue;
+      }
+
       cache.set(name, instance);
 
       if (instance.load) {
-        instance.load(_cfg);
+        const baseContext = _plugin.createBaseContext();
+        await instance.load(baseContext.config);
       }
 
       _log.debug(`The plugin '${pluginName}' has been loaded.`);
+    } catch (error) {
+      _log.err(`Failed to load plugin '${pluginName}':`, error);
     }
-  } catch (error) {
-    _log.err("Failed to load plugins:", error);
   }
 }
 
-async function executePlugins(hook, ctx, services) {
+/**
+ * @param {import("@shevky/base").PluginHook | string} hook
+ * @returns {Promise<void>}
+ */
+async function executePlugins(hook) {
   for (const [name, plugin] of cache.entries()) {
     const hooks = plugin.hooks || null;
     if (!hooks) {
@@ -49,13 +91,25 @@ async function executePlugins(hook, ctx, services) {
       continue;
     }
 
-    await handler(ctx, services);
-    _log.debug(`The '${name}' plugin has been triggered with '${hook}' hook.`);
+    try {
+      const ctx = _createContext(hook);
+
+      _log.debug(
+        `The '${name}' plugin has been triggered with '${hook}' hook.`,
+      );
+
+      await handler(ctx);
+    } catch (error) {
+      _log.err(
+        `The '${name}' plugin has been failed with '${hook}' hook. Error: `,
+        error,
+      );
+    }
   }
 }
 
 const API = {
-  hooks: HOOKS,
+  hooks: _plugin.hooks,
   load: loadPlugins,
   execute: executePlugins,
 };

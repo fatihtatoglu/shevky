@@ -1,92 +1,95 @@
 import commandLineArgs from "command-line-args";
 import commandLineUsage from "command-line-usage";
 
+/**
+ * @typedef {import("command-line-args").OptionDefinition} OptionDefinition
+ * @typedef {import("command-line-args").CommandLineOptions} CommandLineOptions
+ * @typedef {import("command-line-usage").Section} UsageSection
+ */
+
+/** @returns {OptionDefinition[]} */
 function getCliOptionDefinitions() {
-    /**@type commandLineArgs.OptionDefinition[] */
-    const optionDefinitions = [
-        {
-            name: "help",
-            alias: "h",
-            type: Boolean,
-            description: "Show command line help."
-        },
-        {
-            name: "version",
-            alias: "v",
-            type: Boolean,
-            description: "Print version information."
-        },
-        {
-            name: "init",
-            type: Boolean,
-            description: "Initialize the project structure with sample content."
-        },
-        {
-            name: "build",
-            type: Boolean,
-            description: "Build the project and prepare the deployable artifact."
-        },
-        {
-            name: "watch",
-            type: Boolean,
-            description: "Rebuild the project when files under src/ change."
-        },
-        {
-            name: "dev",
-            type: Boolean,
-            description: "Build the project and serve dist/ at http://localhost:3000."
-        }
-    ];
+  const optionDefinitions = [
+    {
+      name: "help",
+      alias: "h",
+      type: Boolean,
+      description: "Show command line help.",
+    },
+    {
+      name: "version",
+      alias: "v",
+      type: Boolean,
+      description: "Print version information.",
+    },
+    {
+      name: "init",
+      type: Boolean,
+      description: "Initialize the project structure with sample content.",
+    },
+    {
+      name: "build",
+      type: Boolean,
+      description: "Build the project and prepare the deployable artifact.",
+    },
+    {
+      name: "dev",
+      type: Boolean,
+      description:
+        "Build the project and serve dist/ at http://localhost:3000.",
+    },
+  ];
 
-    return optionDefinitions;
+  return optionDefinitions;
 }
 
+/** @returns {CommandLineOptions} */
 function parseArgv() {
-    const optionDefinitions = getCliOptionDefinitions();
-
-    /** @type commandLineArgs.CommandLineOptions */
-    const options = commandLineArgs(optionDefinitions);
-
-    return options;
+  const optionDefinitions = getCliOptionDefinitions();
+  return commandLineArgs(optionDefinitions);
 }
 
+/** @returns {string} */
 function help() {
-    const optionDefinitions = getCliOptionDefinitions();
+  const optionDefinitions = getCliOptionDefinitions();
 
-    /** @type commandLineUsage.Section */
-    const commandSections = [{
-        header: "Shevky",
-        content: "A minimal, dependency-light static site generator."
+  /** @type {UsageSection[]} */
+  const commandSections = [
+    {
+      header: "Shevky",
+      content: "A minimal, dependency-light static site generator.",
     },
     {
-        header: "Options",
-        optionList: optionDefinitions
+      header: "Options",
+      optionList: optionDefinitions,
     },
     {
-        header: "Project Details",
-        content: "Project Home: {underline https://tatoglu.net/project/shevky}"
+      header: "Project Details",
+      content: "Project Home: {underline https://tatoglu.net/project/shevky}",
     },
     {
-        content: "GitHub: {underline https://github.com/fatihtatoglu/shevky}"
-    }];
+      content: "GitHub: {underline https://github.com/fatihtatoglu/shevky}",
+    },
+  ];
 
-    const usage = commandLineUsage(commandSections);
-    return usage;
+  return commandLineUsage(commandSections);
 }
 
-function version(version_number) {
-    const version = commandLineUsage({
-        header: "Shevky v" + version_number,
-        content: "A minimal, dependency-light static site generator.",
-    });
-
-    return version;
+/**
+ * @param {string} versionNumber
+ * @returns {string}
+ */
+function version(versionNumber) {
+  return commandLineUsage({
+    header: `Shevky v${versionNumber}`,
+    content: "A minimal, dependency-light static site generator.",
+  });
 }
 
 const API = {
-    options: parseArgv(),
-    help: help,
-    version: version
+  options: parseArgv(),
+  help,
+  version,
 };
 
 export default API;

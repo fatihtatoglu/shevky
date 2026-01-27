@@ -98,6 +98,7 @@ async function loadTemplate(directoryPath) {
     if (!entry.endsWith(".mustache")) {
       continue;
     }
+    
     const key = `${entry.replace(/\.mustache$/, "")}`;
     const path = _io.path.combine(directoryPath, entry);
     const template = await _io.file.read(path);

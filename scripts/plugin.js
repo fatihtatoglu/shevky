@@ -1,5 +1,6 @@
 import { exec as _exec, log as _log, plugin as _plugin } from "@shevky/base";
 import _prj from "./project.js";
+import _content from "./content.js";
 
 /**
  * @typedef {Object} PluginInstance

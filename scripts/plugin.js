@@ -23,6 +23,11 @@ function _createContext(hook) {
   return {
     ...baseContext,
     paths: projectPaths,
+    ...(hook === _plugin.hooks.CONTENT_LOAD
+      ? {
+          contentFiles: _content.contents.files,
+        }
+      : {}),
   };
 }
 

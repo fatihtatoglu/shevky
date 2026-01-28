@@ -75,66 +75,12 @@ class MetaEngine {
       return input;
     }
 
-    const value = input.trim();
-    if (!value) {
-      return value;
-    }
-
-    const hashIndex = value.indexOf("#");
-    let hash = "";
-    let path = value;
-    if (hashIndex !== -1) {
-      hash = value.slice(hashIndex);
-      path = value.slice(0, hashIndex);
-    }
-
-    const queryIndex = path.indexOf("?");
-    let query = "";
-    if (queryIndex !== -1) {
-      query = path.slice(queryIndex);
-      path = path.slice(0, queryIndex);
-    }
-
-    if (!path || path.endsWith("/")) {
-      return `${path}${query}${hash}`;
-    }
-
-    const lastSlashIndex = path.lastIndexOf("/");
-    const lastSegment =
-      lastSlashIndex >= 0 ? path.slice(lastSlashIndex + 1) : path;
-
-    if (!lastSegment || lastSegment.includes(".") || lastSegment === "~") {
-      return `${path}${query}${hash}`;
-    }
-
-    return `${path}/${query}${hash}`;
+    return _fmt.ensureDirectoryTrailingSlash(input);
   }
 
   /** @param {string} value */
   resolveUrl(value) {
-    const trimmedValue = typeof value === "string" ? value.trim() : "";
-    if (!trimmedValue) {
-      return this.ensureDirectoryTrailingSlash(_cfg.identity.url);
-    }
-
-    if (
-      trimmedValue.startsWith("http://") ||
-      trimmedValue.startsWith("https://")
-    ) {
-      return this.ensureDirectoryTrailingSlash(trimmedValue);
-    }
-
-    let absolute;
-    if (trimmedValue.startsWith("~/")) {
-      absolute = `${_cfg.identity.url}/${trimmedValue.slice(2)}`;
-    } else if (trimmedValue.startsWith("/")) {
-      absolute = `${_cfg.identity.url}${trimmedValue}`;
-    } else {
-      absolute = `${_cfg.identity.url}/${trimmedValue}`;
-    }
-
-    const normalized = absolute.replace(/([^:]\/)\/+/g, "$1");
-    return this.ensureDirectoryTrailingSlash(normalized);
+    return _fmt.resolveUrl(value, _cfg.identity.url);
   }
 
   /** @param {string} lang */

@@ -119,16 +119,6 @@ _log.step("I18N_READY", {
   file: normalizeLogPath(I18N_CONFIG_PATH),
   locales: _i18n.supported.length,
 });
-await _content.contents.load(CONTENT_DIR);
-const contentSample = previewList(
-  _content.contents.files.map(describeContentEntry),
-  8,
-);
-_log.step("CONTENT_LOADED", {
-  dir: normalizeLogPath(CONTENT_DIR),
-  files: _content.contents.count,
-  sample: contentSample,
-});
 await _view.partials.load(LAYOUTS_DIR);
 const partialKeys = Object.keys(_view.partials.files);
 _log.step("PARTIALS_READY", {
@@ -174,16 +164,16 @@ const FALLBACK_TAGLINES = { tr: "-", en: "-" };
 /** @type {Record<string, any>} */
 const COLLECTION_CONFIG = _cfg.content.collections;
 
-/** @type {Record<string, MenuItem[]>} */
-const MENU_ITEMS = await buildMenuItemsFromContent();
-/** @type {Record<string, Record<string, CollectionEntry[]>>} */
-const PAGES = await buildCategoryTagCollections();
-/** @type {Record<string, FooterPolicy[]>} */
-const FOOTER_POLICIES = await buildFooterPoliciesFromContent();
-/** @type {Record<string, Record<string, { id: string, lang: string, title: string, canonical: string }>>} */
-const CONTENT_INDEX = await buildContentIndex();
-
 const GENERATED_PAGES = new Set();
+
+/** @type {Record<string, MenuItem[]>} */
+let MENU_ITEMS = {};
+/** @type {Record<string, Record<string, CollectionEntry[]>>} */
+let PAGES = {};
+/** @type {Record<string, FooterPolicy[]>} */
+let FOOTER_POLICIES = {};
+/** @type {Record<string, Record<string, { id: string, lang: string, title: string, canonical: string }>>} */
+let CONTENT_INDEX = {};
 setupMarkdown();
 
 /** @param {unknown} input */
@@ -1178,71 +1168,7 @@ function sortCollectionEntries(collections) {
   return sorted;
 }
 
-/** @param {string} lang @param {number} [limit] */
-async function collectRssEntriesForLang(lang, limit = 50) {
-  if (_content.contents.count === 0) {
-    return [];
-  }
-
-  /** @type {Array<{ title: string, description: string, link: string, guid: string, date: string | number | Date, category: string, categories: string[] }>} */
-  const entries = [];
-  const contentFiles = /** @type {ContentFile[]} */ (
-    /** @type {unknown} */ (_content.contents.files)
-  );
-  for (const file of contentFiles) {
-    if (
-      !file.isValid ||
-      file.isDraft ||
-      !file.isPublished ||
-      !file.isPostTemplate ||
-      file.lang !== lang
-    ) {
-      continue;
-    }
-
-    /** @type {string[]} */
-    const categories = [];
-    if (file.category) {
-      categories.push(file.category);
-    }
-    if (Array.isArray(file.tags)) {
-      categories.push(...file.tags);
-    }
-
-    const uniqueCategories = [
-      ...new Set(
-        categories
-          .map((category) =>
-            typeof category === "string" ? category.trim() : "",
-          )
-          .filter(Boolean),
-      ),
-    ];
-
-    entries.push({
-      title: file.title,
-      description: file.description,
-      link: meta.resolveUrl(file.canonical),
-      guid: meta.resolveUrl(file.canonical),
-      date: file.date,
-      category: file.category,
-      categories: uniqueCategories,
-    });
-  }
-
-  entries.sort((a, b) => {
-    const aTime = a.date ? Date.parse(String(a.date)) || 0 : 0;
-    const bTime = b.date ? Date.parse(String(b.date)) || 0 : 0;
-    return bTime - aTime;
-  });
-
-  if (limit && Number.isFinite(limit) && limit > 0) {
-    return entries.slice(0, limit);
-  }
-
-  return entries;
-}
-
+/** @returns {Promise<Array<{ loc: string, lastmod: string }>>} */
 async function collectSitemapEntriesFromContent() {
   if (_content.contents.count === 0) {
     return [];
@@ -1448,125 +1374,6 @@ function collectSitemapEntriesFromDynamicCollections() {
 
   urls.sort((a, b) => (a.loc || "").localeCompare(b.loc || ""));
   return urls;
-}
-
-async function buildRssFeeds() {
-  const email = _cfg.identity.email;
-  const authorName = _cfg.identity.author;
-  const languages = _i18n.supported.length ? _i18n.supported : [_i18n.default];
-  const feedUrls = languages.reduce((acc, lang) => {
-    const langConfig = _i18n.build[lang] ?? _i18n.build[_i18n.default];
-    const baseUrl = (langConfig?.canonical ?? _cfg.identity.url) || "";
-    const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-    acc[lang] = `${normalizedBase}feed.xml`;
-    return acc;
-  }, /** @type {Record<string, string>} */ ({}));
-
-  for (const lang of languages) {
-    const rssEntries = await collectRssEntriesForLang(lang, 50);
-    if (!rssEntries.length) {
-      return;
-    }
-
-    const siteTitle = _i18n.t(lang, "site.title", _cfg.identity.author);
-    const siteDescription = _i18n.t(lang, "site.description", "");
-    const langConfig = _i18n.build[lang] ?? _i18n.build[_i18n.default];
-    const channelLink = langConfig?.canonical ?? _cfg.identity.url;
-    const selfFeedLink = feedUrls[lang] ?? `${channelLink}feed.xml`;
-    const languageCulture = _i18n.culture(lang) ?? lang;
-    const languageCode = languageCulture.replace("_", "-");
-    const lastBuildDate = _fmt.rssDate(new Date());
-    const alternateFeedLinks = languages
-      .filter(
-        (alternateLang) => alternateLang !== lang && feedUrls[alternateLang],
-      )
-      .map(
-        (alternateLang) =>
-          `    <atom:link href="${_fmt.escape(feedUrls[alternateLang])}" rel="alternate" hreflang="${_fmt.escape(alternateLang)}" type="application/rss+xml" />`,
-      )
-      .join("\n");
-
-    const itemsXml = rssEntries
-      .map((entry) => {
-        const description = entry.description ? entry.description.trim() : "";
-        const descriptionCdata = description
-          ? `<![CDATA[ ${description} ]]>`
-          : "";
-        const authorField =
-          email && authorName
-            ? `${email} (${authorName})`
-            : email || authorName || "";
-        /** @type {string[]} */
-        const categories = [];
-        if (entry.category) {
-          categories.push(entry.category);
-        }
-
-        const categoryLines = [
-          ...new Set(
-            categories
-              .map((category) =>
-                typeof category === "string" ? category.trim() : "",
-              )
-              .filter(Boolean),
-          ),
-        ]
-          .map(
-            (category) => `    <category>${_fmt.escape(category)}</category>`,
-          )
-          .join("\n");
-
-        return [
-          "  <item>",
-          `    <title>${_fmt.escape(entry.title)}</title>`,
-          `    <link>${_fmt.escape(entry.link)}</link>`,
-          `    <guid isPermaLink="true">${_fmt.escape(entry.guid)}</guid>`,
-          entry.date
-            ? `    <pubDate>${_fmt.rssDate(entry.date)}</pubDate>`
-            : "",
-          descriptionCdata
-            ? `    <description>${descriptionCdata}</description>`
-            : "",
-          authorField ? `    <author>${_fmt.escape(authorField)}</author>` : "",
-          categoryLines,
-          "  </item>",
-        ]
-          .filter(Boolean)
-          .join("\n");
-      })
-      .join("\n");
-
-    const rssXml = [
-      '<?xml version="1.0" encoding="UTF-8"?>',
-      '<?xml-stylesheet type="text/xsl" href="/assets/rss.xsl"?>',
-      '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">',
-      "  <channel>",
-      `    <title>${_fmt.escape(siteTitle)}</title>`,
-      `    <link>${_fmt.escape(channelLink)}</link>`,
-      `    <atom:link href="${_fmt.escape(selfFeedLink)}" rel="self" type="application/rss+xml" />`,
-      ...(alternateFeedLinks ? [alternateFeedLinks] : []),
-      `    <description>${_fmt.escape(siteDescription)}</description>`,
-      `    <language>${_fmt.escape(languageCode)}</language>`,
-      `    <lastBuildDate>${lastBuildDate}</lastBuildDate>`,
-      `    <generator>Shevky Static Site Generator</generator>`,
-      `    <managingEditor>${_cfg.identity.email} (${_cfg.identity.author})</managingEditor>`,
-      `    <ttl>1440</ttl>`,
-      itemsXml,
-      "  </channel>",
-      "</rss>",
-      "",
-    ].join("\n");
-
-    const relativePath =
-      lang === _i18n.default ? "feed.xml" : _io.path.combine(lang, "feed.xml");
-    await writeHtmlFile(relativePath, rssXml, {
-      action: "BUILD_FEED",
-      type: "xml",
-      lang,
-      items: rssEntries.length,
-      inputBytes: byteLength(itemsXml),
-    });
-  }
 }
 
 async function buildSitemap() {
@@ -2290,9 +2097,18 @@ async function main() {
   await _plugin.execute(_plugin.hooks.ASSETS_COPY);
   // assets:copy --->
 
+  // <--- content:load
+  await _content.contents.load(CONTENT_DIR);
+  await _plugin.execute(_plugin.hooks.CONTENT_LOAD);
+
+  MENU_ITEMS = await buildMenuItemsFromContent();
+  PAGES = await buildCategoryTagCollections();
+  FOOTER_POLICIES = await buildFooterPoliciesFromContent();
+  CONTENT_INDEX = await buildContentIndex();
+  // content:load --->
+
   await buildContentPages();
   await copyHtmlRecursive();
-  await buildRssFeeds();
   await buildSitemap();
   _log.step("BUILD_DONE", { dist: normalizeLogPath(DIST_DIR) });
 }

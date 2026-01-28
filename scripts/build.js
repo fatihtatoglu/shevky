@@ -29,57 +29,8 @@ import {
 
 const meta = new MetaEngine();
 
-/**
- * @typedef {Object} ContentSummary
- * @property {string} id
- * @property {string} title
- * @property {string} slug
- * @property {string} lang
- * @property {string} canonical
- * @property {string | number | Date} date
- * @property {string | number | Date | undefined} updated
- * @property {string} description
- * @property {string} cover
- * @property {string} coverAlt
- * @property {string} coverCaption
- * @property {number} readingTime
- * @property {string | null} dateDisplay
- * @property {string | undefined} seriesTitle
- */
-
-/**
- * @typedef {Object} ContentFile
- * @property {object} header
- * @property {string} content
- * @property {boolean} isValid
- * @property {boolean} isDraft
- * @property {boolean} isPublished
- * @property {boolean} isPostTemplate
- * @property {boolean} isFeatured
- * @property {string} category
- * @property {string[]} tags
- * @property {string} series
- * @property {string} seriesTitle
- * @property {string} id
- * @property {string} lang
- * @property {string} slug
- * @property {string} canonical
- * @property {string} title
- * @property {string} template
- * @property {string} layout
- * @property {string} menuLabel
- * @property {boolean} isHiddenOnMenu
- * @property {number} menuOrder
- * @property {string | number | Date} date
- * @property {string | number | Date | undefined} updated
- * @property {string} description
- * @property {string} cover
- * @property {string} coverAlt
- * @property {string} coverCaption
- * @property {number} readingTime
- * @property {string} sourcePath
- * @property {() => ContentSummary} toSummary
- */
+/** @typedef {ReturnType<import("./content.js").ContentSummary["toObject"]>} ContentSummary */
+/** @typedef {import("./content.js").ContentFile} ContentFile */
 
 /**
  * @typedef {Record<string, any>} FrontMatter
@@ -910,7 +861,7 @@ async function buildCategoryTagCollections() {
     }
 
     const summary = {
-      ...file.toSummary(),
+      ...file.toSummary().toObject(),
       canonical: buildContentUrl(file.canonical, file.lang, file.slug),
     };
     const langStore = pagesByLang[file.lang] ?? (pagesByLang[file.lang] = {});
@@ -932,7 +883,7 @@ async function buildCategoryTagCollections() {
         langStore,
         file.series,
         {
-          ...file.toSummary(),
+          ...file.toSummary().toObject(),
           seriesTitle: file.seriesTitle,
         },
         "series",

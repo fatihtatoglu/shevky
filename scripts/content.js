@@ -1,7 +1,7 @@
 import matter from "gray-matter";
 import { io as _io, config as _cfg, format as _fmt } from "@shevky/base";
 
-class ContentSummary {
+export class ContentSummary {
   /**
    * @param {ContentFile} item
    */
@@ -43,6 +43,45 @@ class ContentSummary {
 
   get dateDisplay() {
     return this._item.dateDisplay;
+  }
+
+  get slug() {
+    return this._item.slug;
+  }
+
+  get lang() {
+    return this._item.lang;
+  }
+
+  get canonical() {
+    return this._item.canonical;
+  }
+
+  get updated() {
+    return this._item.updated;
+  }
+
+  get seriesTitle() {
+    return this._item.seriesTitle;
+  }
+
+  toObject() {
+    return {
+      id: this.id,
+      title: this.title,
+      slug: this.slug,
+      lang: this.lang,
+      canonical: this.canonical,
+      date: this.date,
+      updated: this.updated,
+      description: this.description,
+      cover: this.cover,
+      coverAlt: this.coverAlt,
+      coverCaption: this.coverCaption,
+      readingTime: this.readingTime,
+      dateDisplay: this.dateDisplay,
+      seriesTitle: this.seriesTitle,
+    };
   }
 }
 
@@ -275,7 +314,7 @@ class ContentBody {
   }
 }
 
-class ContentFile {
+export class ContentFile {
   /**
    * @param {{
    *   data: Record<string, unknown>,

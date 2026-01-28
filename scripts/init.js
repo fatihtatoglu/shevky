@@ -1,14 +1,13 @@
 import degit from "degit";
 import { io as _io, exec as _exec, log as _log } from "@shevky/base";
 
-import _prj from "./project.js";
+import _prj from "../lib/project.js";
 
 const TEMPLATE_REPO = "fatihtatoglu/shevky-simple-blog";
 
-const projectPaths = _prj.getPaths();
-const ROOT_DIR = projectPaths.root;
-const SRC_DIR = projectPaths.src;
-const TEMP_DIR = projectPaths.tmp;
+const ROOT_DIR = _prj.rootDir;
+const SRC_DIR = _prj.srcDir;
+const TEMP_DIR = _prj.tmpDir;
 
 /** @type {string[]} */
 const packages = [

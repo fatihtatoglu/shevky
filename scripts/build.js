@@ -10,14 +10,14 @@ import {
   log as _log,
   format as _fmt,
   exec as _exec,
+  plugin as _plugin,
 } from "@shevky/base";
 
-import _prj from "./project.js";
+import _prj from "../lib/project.js";
 import _analytics from "./analytics.js";
-import _content from "./content.js";
 import _view from "./view.js";
 import _social from "./social.js";
-import _plugin from "./plugin.js";
+
 import { MetaEngine } from "./meta.js";
 import {
   setupMarkdown,
@@ -27,38 +27,36 @@ import {
   injectMarkdownComponents,
 } from "./engine.js";
 
+import { ContentSummary } from "../lib/contentSummary.js";
+
+import { MenuEngine } from "../engines/menuEngine.js";
+import { ContentRegistry } from "../registries/contentRegistry.js";
+import { PluginRegistry } from "../registries/pluginRegistry.js";
+import { PluginEngine } from "../engines/pluginEngine.js";
+
+/** @typedef {import("../lib/contentFile.js").ContentFile} ContentFile */
+/** @typedef {Record<string, any>} FrontMatter */
+/** @typedef {ReturnType<import("../lib/contentSummary.js").ContentSummary["toObject"]>} ContentSummaryLike */
+/** @typedef {ContentSummaryLike & { type?: string, seriesTitle?: string }} CollectionEntry */
+/** @typedef {{ key: string, label: string, url: string, lang: string }} FooterPolicy */
+
+const contentRegistry = new ContentRegistry();
+const pluginRegistry = new PluginRegistry();
+const pluginEngine = new PluginEngine(pluginRegistry, contentRegistry);
+const menu = new MenuEngine(contentRegistry, buildContentUrl);
+
 const meta = new MetaEngine();
 
-/** @typedef {ReturnType<import("./content.js").ContentSummary["toObject"]>} ContentSummary */
-/** @typedef {import("./content.js").ContentFile} ContentFile */
-
-/**
- * @typedef {Record<string, any>} FrontMatter
- */
-
-/**
- * @typedef {ContentSummary & { type?: string, seriesTitle?: string }} CollectionEntry
- */
-
-/**
- * @typedef {{ key: string, label: string, url: string }} MenuItem
- */
-
-/**
- * @typedef {{ key: string, label: string, url: string, lang: string }} FooterPolicy
- */
-
-const projectPaths = _prj.getPaths();
-const ROOT_DIR = projectPaths.root;
-const SRC_DIR = projectPaths.src;
-const DIST_DIR = projectPaths.dist;
-const CONTENT_DIR = projectPaths.content;
-const LAYOUTS_DIR = projectPaths.layouts;
-const COMPONENTS_DIR = projectPaths.components;
-const TEMPLATES_DIR = projectPaths.templates;
-const ASSETS_DIR = projectPaths.assets;
-const SITE_CONFIG_PATH = projectPaths.siteConfig;
-const I18N_CONFIG_PATH = projectPaths.i18nConfig;
+const ROOT_DIR = _prj.rootDir;
+const SRC_DIR = _prj.srcDir;
+const DIST_DIR = _prj.distDir;
+const CONTENT_DIR = _prj.contentDir;
+const LAYOUTS_DIR = _prj.layoutsDir;
+const COMPONENTS_DIR = _prj.componentsDir;
+const TEMPLATES_DIR = _prj.templatesDir;
+const ASSETS_DIR = _prj.assetsDir;
+const SITE_CONFIG_PATH = _prj.siteConfig;
+const I18N_CONFIG_PATH = _prj.i18nConfig;
 
 await _i18n.load(I18N_CONFIG_PATH);
 await _cfg.load(SITE_CONFIG_PATH);
@@ -101,11 +99,7 @@ _log.step("TEMPLATES_READY", {
   sample: previewList(templateKeys, 8),
 });
 
-await _plugin.load(_cfg.plugins);
-_log.step("PLUGINS_READY", {
-  plugins: previewList(_cfg.plugins, 8) ?? "",
-  count: Array.isArray(_cfg.plugins) ? _cfg.plugins.length : 0,
-});
+await pluginRegistry.load(_cfg.plugins);
 
 const versionToken = crypto.randomBytes(6).toString("hex");
 const SEO_INCLUDE_COLLECTIONS = _cfg.seo.includeCollections;
@@ -117,8 +111,6 @@ const COLLECTION_CONFIG = _cfg.content.collections;
 
 const GENERATED_PAGES = new Set();
 
-/** @type {Record<string, MenuItem[]>} */
-let MENU_ITEMS = {};
 /** @type {Record<string, Record<string, CollectionEntry[]>>} */
 let PAGES = {};
 /** @type {Record<string, FooterPolicy[]>} */
@@ -379,42 +371,6 @@ function applyLanguageMetadata(html, langKey) {
   return output;
 }
 
-/** @param {string} lang @param {string | null} activeKey */
-function getMenuData(lang, activeKey) {
-  const baseItems = MENU_ITEMS[lang] ?? MENU_ITEMS[_i18n.default] ?? [];
-  const normalizedActiveKey =
-    typeof activeKey === "string" && activeKey.trim().length > 0
-      ? activeKey.trim()
-      : null;
-  const hasExplicitMatch = normalizedActiveKey
-    ? baseItems.some((item) => item.key === normalizedActiveKey)
-    : false;
-  const resolvedActiveKey = hasExplicitMatch
-    ? normalizedActiveKey
-    : (baseItems[0]?.key ?? "");
-  const items = baseItems.map((item) => ({
-    ...item,
-    label: _i18n.t(lang, `menu.${item.key}`, item.label ?? item.key),
-    isActive: item.key === resolvedActiveKey,
-  }));
-  return { items, activeKey: resolvedActiveKey };
-}
-
-/** @param {{ id?: unknown, slug?: unknown } | null | undefined} frontMatter */
-function resolveActiveMenuKey(frontMatter) {
-  if (!frontMatter) return null;
-  if (typeof frontMatter.id === "string" && frontMatter.id.trim().length > 0) {
-    return frontMatter.id.trim();
-  }
-  if (
-    typeof frontMatter.slug === "string" &&
-    frontMatter.slug.trim().length > 0
-  ) {
-    return frontMatter.slug.trim();
-  }
-  return null;
-}
-
 /** @param {string} key @param {string} lang */
 function buildTagSlug(key, lang) {
   if (!key) {
@@ -579,13 +535,15 @@ async function renderContentTemplate(
   listingOverride,
 ) {
   const template = _view.templates.get(templateName);
+  /** @type {string[]} */
   const normalizedTags = Array.isArray(front.tags)
     ? front.tags.filter(
-        (tag) => typeof tag === "string" && tag.trim().length > 0,
+        (/** @type {string} */ tag) =>
+          typeof tag === "string" && tag.trim().length > 0,
       )
     : [];
   const tagLinks = normalizedTags
-    .map((tag) => {
+    .map((/** @type {string} */ tag) => {
       const url = buildTagUrlFromLabel(tag, lang);
       return url ? { label: tag, url } : null;
     })
@@ -686,7 +644,7 @@ function buildViewPayload({
     isTurkish: languageFlags.isTurkish,
     theme: "light",
     site: meta.buildSiteData(lang),
-    menu: getMenuData(lang, activeMenuKey),
+    menu: menu.getMenuData(lang, activeMenuKey),
     footer: getFooterData(lang),
     pages: PAGES,
     i18n: dictionary,
@@ -775,15 +733,13 @@ function buildContentUrl(canonical, lang, slug) {
 }
 
 async function buildFooterPoliciesFromContent() {
-  if (_content.contents.count === 0) {
+  if (contentRegistry.count === 0) {
     return {};
   }
 
   /** @type {Record<string, FooterPolicy[]>} */
   const policiesByLang = {};
-  const contentFiles = /** @type {ContentFile[]} */ (
-    /** @type {unknown} */ (_content.contents.files)
-  );
+  const contentFiles = contentRegistry.files;
   for (const file of contentFiles) {
     if (
       !file.isValid ||
@@ -816,15 +772,13 @@ async function buildFooterPoliciesFromContent() {
 }
 
 async function buildContentIndex() {
-  if (_content.contents.count === 0) {
+  if (contentRegistry.count === 0) {
     return {};
   }
 
   /** @type {Record<string, Record<string, { id: string, lang: string, title: string, canonical: string }>>} */
   const index = {};
-  const contentFiles = /** @type {ContentFile[]} */ (
-    /** @type {unknown} */ (_content.contents.files)
-  );
+  const contentFiles = contentRegistry.files;
   for (const file of contentFiles) {
     if (!file.isValid || file.isDraft || !file.isPublished || !file.id) {
       continue;
@@ -846,22 +800,21 @@ async function buildContentIndex() {
 }
 
 async function buildCategoryTagCollections() {
-  if (_content.contents.count === 0) {
+  if (contentRegistry.count === 0) {
     return {};
   }
 
   /** @type {Record<string, Record<string, CollectionEntry[]>>} */
   const pagesByLang = {};
-  const contentFiles = /** @type {ContentFile[]} */ (
-    /** @type {unknown} */ (_content.contents.files)
-  );
+  const contentFiles = contentRegistry.files;
   for (const file of contentFiles) {
     if (!file.isValid || file.isDraft || !file.isPublished) {
       continue;
     }
 
+    const contentSummary = new ContentSummary(file);
     const summary = {
-      ...file.toSummary().toObject(),
+      ...contentSummary.toObject(),
       canonical: buildContentUrl(file.canonical, file.lang, file.slug),
     };
     const langStore = pagesByLang[file.lang] ?? (pagesByLang[file.lang] = {});
@@ -883,7 +836,7 @@ async function buildCategoryTagCollections() {
         langStore,
         file.series,
         {
-          ...file.toSummary().toObject(),
+          ...contentSummary.toObject(),
           seriesTitle: file.seriesTitle,
         },
         "series",
@@ -919,6 +872,7 @@ function buildCollectionListing(front, lang) {
 
 /** @param {FrontMatter} front @param {string} lang */
 function buildSeriesListing(front, lang) {
+  /** @type {string[]} */
   const relatedSource = Array.isArray(front?.related) ? front.related : [];
   const seriesName =
     typeof front?.seriesTitle === "string" &&
@@ -931,7 +885,7 @@ function buildSeriesListing(front, lang) {
   /** @type {Array<{ id: string, label: string, url: string, hasUrl?: boolean, isCurrent: boolean, isPlaceholder: boolean }>} */
   const items = [];
 
-  relatedSource.forEach((entry) => {
+  relatedSource.forEach((/** @type {string} */ entry) => {
     const value = typeof entry === "string" ? entry.trim() : "";
     if (!value) {
       items.push({
@@ -1088,7 +1042,7 @@ function resolveListingHeading(front) {
   return "";
 }
 
-/** @param {Record<string, CollectionEntry[]>} store @param {string} key @param {ContentSummary} entry @param {string} type */
+/** @param {Record<string, CollectionEntry[]>} store @param {string} key @param {ContentSummaryLike} entry @param {string} type */
 function addCollectionEntry(store, key, entry, type) {
   if (!store[key]) {
     store[key] = [];
@@ -1121,14 +1075,14 @@ function sortCollectionEntries(collections) {
 
 /** @returns {Promise<Array<{ loc: string, lastmod: string }>>} */
 async function collectSitemapEntriesFromContent() {
-  if (_content.contents.count === 0) {
+  if (contentRegistry.count === 0) {
     return [];
   }
 
   /** @type {Array<{ loc: string, lastmod: string }>} */
   const urls = [];
   const contentFiles = /** @type {ContentFile[]} */ (
-    /** @type {unknown} */ (_content.contents.files)
+    /** @type {unknown} */ (contentRegistry.files)
   );
   for (const file of contentFiles) {
     if (!file.isValid || file.isDraft || !file.isPublished) {
@@ -1395,65 +1349,13 @@ async function buildSitemap() {
   });
 }
 
-async function buildMenuItemsFromContent() {
-  if (_content.contents.count === 0) {
-    return {};
-  }
-
-  /** @type {Record<string, Array<MenuItem & { order?: number }>>} */
-  const itemsByLang = {};
-  const contentFiles = /** @type {ContentFile[]} */ (
-    /** @type {unknown} */ (_content.contents.files)
-  );
-  for (const file of contentFiles) {
-    if (
-      !file.isValid ||
-      file.isDraft ||
-      !file.isPublished ||
-      file.isHiddenOnMenu
-    ) {
-      continue;
-    }
-
-    const url = buildContentUrl(file.canonical, file.lang, file.slug);
-
-    if (!Array.isArray(itemsByLang[file.lang])) {
-      itemsByLang[file.lang] = [];
-    }
-
-    itemsByLang[file.lang].push({
-      key: file.id,
-      label: file.menuLabel,
-      url,
-      order: file.menuOrder,
-    });
-  }
-
-  Object.keys(itemsByLang).forEach((lang) => {
-    itemsByLang[lang]
-      .sort((a, b) => {
-        const aOrder = typeof a.order === "number" ? a.order : 0;
-        const bOrder = typeof b.order === "number" ? b.order : 0;
-        if (aOrder === bOrder) {
-          return a.label.localeCompare(b.label, lang);
-        }
-        return aOrder - bOrder;
-      })
-      .forEach((item) => {
-        delete item.order;
-      });
-  });
-
-  return itemsByLang;
-}
-
 async function buildContentPages() {
-  if (_content.contents.count === 0) {
+  if (contentRegistry.count === 0) {
     return;
   }
 
   const contentFiles = /** @type {ContentFile[]} */ (
-    /** @type {unknown} */ (_content.contents.files)
+    /** @type {unknown} */ (contentRegistry.files)
   );
   for (const file of contentFiles) {
     _log.step("PROCESS_CONTENT", {
@@ -1509,7 +1411,7 @@ async function buildContentPages() {
       dictionary,
     );
     const pageMeta = meta.buildPageMeta(file.header, file.lang, file.slug);
-    const activeMenuKey = resolveActiveMenuKey(file.header);
+    const activeMenuKey = menu.resolveActiveMenuKey(file.header);
     const view = buildViewPayload({
       lang: file.lang,
       activeMenuKey,
@@ -1648,7 +1550,7 @@ async function buildPaginatedCollectionPages(options) {
     );
 
     const pageMeta = meta.buildPageMeta(frontForPage, lang, pageSlug);
-    const activeMenuKey = resolveActiveMenuKey(frontForPage);
+    const activeMenuKey = menu.resolveActiveMenuKey(frontForPage);
     const view = buildViewPayload({
       lang,
       activeMenuKey,
@@ -1896,7 +1798,7 @@ async function buildDynamicCollectionPages() {
         );
         const pageMeta = meta.buildPageMeta(front, lang, slug);
         const layoutName = "default";
-        const activeMenuKey = resolveActiveMenuKey(front);
+        const activeMenuKey = menu.resolveActiveMenuKey(front);
         const view = buildViewPayload({
           lang,
           activeMenuKey,
@@ -1995,73 +1897,38 @@ async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
 
 async function copyStaticAssets() {
   if (!(await _io.directory.exists(ASSETS_DIR))) {
-    _log.step("ASSETS_SKIP", {
-      reason: "missing",
-      dir: normalizeLogPath(ASSETS_DIR),
-    });
     return;
   }
 
   const targetDir = _io.path.combine(DIST_DIR, "assets");
-
   await _io.directory.copy(ASSETS_DIR, targetDir);
-  _log.step("ASSETS_COPIED", {
-    source: normalizeLogPath(ASSETS_DIR),
-    target: normalizeLogPath(targetDir),
-  });
-
-  if (!_cfg.build.debug) {
-    return;
-  }
-
-  try {
-    const entries = await _io.directory.read(ASSETS_DIR);
-    for (const entry of entries) {
-      const srcPath = _io.path.combine(ASSETS_DIR, entry);
-      const stats = await _io.file.stat(srcPath);
-      if (!stats || (typeof stats.isFile === "function" && !stats.isFile())) {
-        continue;
-      }
-      const destPath = _io.path.combine(targetDir, entry);
-      _log.step("COPY_ASSET", {
-        source: normalizeLogPath(srcPath),
-        target: normalizeLogPath(destPath),
-        output: formatBytes(stats?.size ?? 0),
-      });
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    _log.debug("ASSET_SCAN_FAILED", { message });
-  }
+  _log.debug("Assets have been copied.");
 }
 
 async function main() {
-  _log.step("BUILD_START", { dist: normalizeLogPath(DIST_DIR) });
-  await ensureDist();
-
   // <--- dist:clean
-  await _plugin.execute(_plugin.hooks.DIST_CLEAN);
+  await ensureDist();
+  await pluginEngine.execute(_plugin.hooks.DIST_CLEAN);
   // dist:clean --->
 
   // <--- assets:copy
   await copyStaticAssets();
-  await _plugin.execute(_plugin.hooks.ASSETS_COPY);
+  await pluginEngine.execute(_plugin.hooks.ASSETS_COPY);
   // assets:copy --->
 
   // <--- content:load
-  await _content.contents.load(CONTENT_DIR);
-  await _plugin.execute(_plugin.hooks.CONTENT_LOAD);
+  await contentRegistry.load(CONTENT_DIR);
+  await pluginEngine.execute(_plugin.hooks.CONTENT_LOAD);
+  // content:load --->
 
-  MENU_ITEMS = await buildMenuItemsFromContent();
+  await menu.build();
   PAGES = await buildCategoryTagCollections();
   FOOTER_POLICIES = await buildFooterPoliciesFromContent();
   CONTENT_INDEX = await buildContentIndex();
-  // content:load --->
 
   await buildContentPages();
   await copyHtmlRecursive();
   await buildSitemap();
-  _log.step("BUILD_DONE", { dist: normalizeLogPath(DIST_DIR) });
 }
 
 const API = {

@@ -2,120 +2,101 @@
 
 import crypto from "node:crypto";
 import Mustache from "mustache";
-import { marked } from "marked";
-import { markedHighlight } from "marked-highlight";
-import hljs from "highlight.js";
 import { minify as minifyHtml } from "html-minifier-terser";
+import {
+  io as _io,
+  i18n as _i18n,
+  config as _cfg,
+  log as _log,
+  format as _fmt,
+  plugin as _plugin,
+} from "@shevky/base";
 
-import _io from "./io.js";
-import _cfg from "./config.js";
-import _log from "./log.js";
-import _i18n from "./i18n.js";
-import _npm from "./npm.js";
-import _fmt from "./format.js";
+import _prj from "../lib/project.js";
 import _analytics from "./analytics.js";
-import _core from "./core.js";
 import _social from "./social.js";
 
-const __dirname = _io.path.name(".");
-const ROOT_DIR = _io.path.combine(__dirname,);
-const SRC_DIR = _io.path.combine(ROOT_DIR, "src");
-const DIST_DIR = _io.path.combine(ROOT_DIR, "dist");
-const CONTENT_DIR = _io.path.combine(SRC_DIR, "content");
-const LAYOUTS_DIR = _io.path.combine(SRC_DIR, "layouts");
-const COMPONENTS_DIR = _io.path.combine(SRC_DIR, "components");
-const TEMPLATES_DIR = _io.path.combine(SRC_DIR, "templates");
-const ASSETS_DIR = _io.path.combine(SRC_DIR, "assets");
-const SITE_CONFIG_PATH = _io.path.combine(SRC_DIR, "site.json");
-const I18N_CONFIG_PATH = _io.path.combine(SRC_DIR, "i18n.json");
+import { MetaEngine } from "../engines/metaEngine.js";
+import { RenderEngine } from "../engines/renderEngine.js";
+
+import { PluginRegistry } from "../registries/pluginRegistry.js";
+import {
+  TemplateRegistry,
+  TYPE_COMPONENT,
+  TYPE_LAYOUT,
+  TYPE_PARTIAL,
+  TYPE_TEMPLATE,
+} from "../registries/templateRegistry.js";
+import { ContentRegistry } from "../registries/contentRegistry.js";
+import { PageRegistry } from "../registries/pageRegistry.js";
+
+import { PluginEngine } from "../engines/pluginEngine.js";
+import { MenuEngine } from "../engines/menuEngine.js";
+
+/** @typedef {import("../lib/contentFile.js").ContentFile} ContentFile */
+/** @typedef {import("../types/index.d.ts").FrontMatter} FrontMatter */
+/** @typedef {import("../types/index.d.ts").CollectionEntry} CollectionEntry */
+/** @typedef {import("../types/index.d.ts").CollectionsByLang} CollectionsByLang */
+/** @typedef {import("../types/index.d.ts").FooterPolicy} FooterPolicy */
+
+const SRC_DIR = _prj.srcDir;
+const DIST_DIR = _prj.distDir;
+const CONTENT_DIR = _prj.contentDir;
+const LAYOUTS_DIR = _prj.layoutsDir;
+const COMPONENTS_DIR = _prj.componentsDir;
+const TEMPLATES_DIR = _prj.templatesDir;
+const ASSETS_DIR = _prj.assetsDir;
+const SITE_CONFIG_PATH = _prj.siteConfig;
+const I18N_CONFIG_PATH = _prj.i18nConfig;
+
+const pluginRegistry = new PluginRegistry();
+const templateRegistry = new TemplateRegistry();
+const pageRegistry = new PageRegistry();
+
+const metaEngine = new MetaEngine();
+const contentRegistry = new ContentRegistry(metaEngine);
+const pluginEngine = new PluginEngine(
+  pluginRegistry,
+  contentRegistry,
+  metaEngine,
+);
+const menuEngine = new MenuEngine(contentRegistry, metaEngine);
+const renderEngine = new RenderEngine({
+  templateRegistry,
+  metaEngine,
+  pageRegistry,
+  config: _cfg,
+  format: _fmt,
+});
 
 await _i18n.load(I18N_CONFIG_PATH);
 await _cfg.load(SITE_CONFIG_PATH);
-_log.step("CONFIG_READY", { file: normalizeLogPath(SITE_CONFIG_PATH), debug: _cfg.build.debug ? "on" : "off" });
-_log.step("I18N_READY", { file: normalizeLogPath(I18N_CONFIG_PATH), locales: _i18n.supported.length });
-await _core.contents.load(CONTENT_DIR);
-const contentSample = previewList(_core.contents.files.map(describeContentEntry), 8);
-_log.step("CONTENT_LOADED", {
-  dir: normalizeLogPath(CONTENT_DIR),
-  files: _core.contents.count,
-  sample: contentSample,
-});
-await _core.partials.load(LAYOUTS_DIR);
-const partialKeys = Object.keys(_core.partials.files);
-_log.step("PARTIALS_READY", {
-  dir: normalizeLogPath(LAYOUTS_DIR),
-  total: partialKeys.length,
-  sample: previewList(partialKeys, 8),
-});
-await _core.components.load(COMPONENTS_DIR);
-const componentKeys = Object.keys(_core.components.files);
-_log.step("COMPONENTS_READY", {
-  dir: normalizeLogPath(COMPONENTS_DIR),
-  files: componentKeys.length,
-  sample: previewList(componentKeys, 8),
-});
-await _core.layouts.load(LAYOUTS_DIR);
-const layoutNames = typeof _core.layouts.list === "function" ? _core.layouts.list() : [];
-_log.step("LAYOUTS_READY", {
-  dir: normalizeLogPath(LAYOUTS_DIR),
-  total: layoutNames.length,
-  sample: previewList(layoutNames, 8),
-});
-await _core.templates.load(TEMPLATES_DIR);
-const templateKeys = typeof _core.templates.list === "function" ? _core.templates.list() : [];
-_log.step("TEMPLATES_READY", {
-  dir: normalizeLogPath(TEMPLATES_DIR),
-  total: templateKeys.length,
-  sample: previewList(templateKeys, 8),
-});
+
+await templateRegistry.loadPartials(LAYOUTS_DIR);
+await templateRegistry.loadComponents(COMPONENTS_DIR);
+await templateRegistry.loadLayouts(LAYOUTS_DIR);
+await templateRegistry.loadTemplates(TEMPLATES_DIR);
+
+await pluginRegistry.load(_cfg.plugins);
 
 const versionToken = crypto.randomBytes(6).toString("hex");
-const SEO_INCLUDE_COLLECTIONS = _cfg.seo.includeCollections;
 const DEFAULT_IMAGE = _cfg.seo.defaultImage;
-const FALLBACK_ROLES = { tr: "-", en: "-", };
-const FALLBACK_QUOTES = { tr: "-", en: "-", };
-const FALLBACK_TITLES = { tr: "-", en: "-", };
-const FALLBACK_DESCRIPTIONS = { tr: "-", en: "-", };
-const FALLBACK_OWNER = "-";
-const FALLBACK_TAGLINES = { tr: "-", en: "-", };
+/** @type {Record<string, string>} */
+const FALLBACK_TAGLINES = { tr: "-", en: "-" };
+/** @type {Record<string, any>} */
 const COLLECTION_CONFIG = _cfg.content.collections;
-
-const MENU_ITEMS = await buildMenuItemsFromContent();
-const PAGES = await buildCategoryTagCollections();
-const FOOTER_POLICIES = await buildFooterPoliciesFromContent();
-const CONTENT_INDEX = await buildContentIndex();
 
 const GENERATED_PAGES = new Set();
 
-marked.setOptions({ mangle: false, headerIds: false, gfm: true });
-if (_cfg.markdown.highlight) {
-  marked.use(
-    markedHighlight({
-      langPrefix: "hljs language-",
-      highlight(code, lang) {
-        const language = hljs.getLanguage(lang) ? lang : "plaintext";
-        return hljs.highlight(code, { language }).value;
-      },
-    }),
-  );
-}
-const markdownRenderer = new marked.Renderer();
-markdownRenderer.code = (token, infostring) => {
-  const isTokenObject = token && typeof token === "object";
-  const languageSource = isTokenObject
-    ? token.lang
-    : typeof infostring === "string"
-      ? infostring
-      : "";
-  const language = (languageSource || "").trim().split(/\s+/)[0]?.toLowerCase() || "text";
-  const langClass = language ? ` class="language-${language}"` : "";
-  const value = isTokenObject ? token.text ?? "" : token ?? "";
-  const alreadyEscaped = Boolean(isTokenObject && token.escaped);
-  const content = alreadyEscaped ? value : _fmt.escape(value);
-  return `<pre class="code-block" data-code-language="${language}"><code${langClass}>${content}</code></pre>`;
-};
-marked.use({ renderer: markdownRenderer });
+/** @type {CollectionsByLang} */
+let PAGES = {};
+/** @type {Record<string, FooterPolicy[]>} */
+let FOOTER_POLICIES = {};
+/** @type {Record<string, Record<string, { id: string, lang: string, title: string, canonical: string }>>} */
+let CONTENT_INDEX = {};
+renderEngine.setupMarkdown();
 
+/** @param {unknown} input */
 function byteLength(input) {
   if (input === undefined || input === null) {
     return 0;
@@ -128,6 +109,7 @@ function byteLength(input) {
   return Buffer.byteLength(input);
 }
 
+/** @param {number} bytes */
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "0B";
@@ -146,6 +128,7 @@ function formatBytes(bytes) {
   return `${value.toFixed(precision)}${units[unitIndex]}`;
 }
 
+/** @param {string | null | undefined} pathValue */
 function normalizeLogPath(pathValue) {
   if (!pathValue) {
     return "";
@@ -159,188 +142,26 @@ function normalizeLogPath(pathValue) {
   return normalized;
 }
 
-function previewList(values, limit = 5) {
-  if (!Array.isArray(values) || values.length === 0) {
-    return undefined;
+/** @param {FrontMatter | { raw?: unknown } | null | undefined} front */
+function normalizeFrontMatter(front) {
+  if (!front || typeof front !== "object") {
+    return {};
   }
 
-  const normalized = values
-    .map((value) => (value == null ? "" : String(value).trim()))
-    .filter((value) => value.length > 0);
-  if (!normalized.length) {
-    return undefined;
-  }
+  const raw =
+    "raw" in front && front.raw && typeof front.raw === "object"
+      ? front.raw
+      : front;
 
-  const slice = normalized.slice(0, limit);
-  const extra = normalized.length - slice.length;
-  if (extra > 0) {
-    return `${slice.join(", ")} +${extra}`;
-  }
-
-  return slice.join(", ");
-}
-
-function describeContentEntry(file) {
-  if (!file || typeof file !== "object") {
-    return "";
-  }
-
-  return (
-    (typeof file.id === "string" && file.id.trim()) ||
-    (typeof file.slug === "string" && file.slug.trim()) ||
-    (typeof file.title === "string" && file.title.trim()) ||
-    normalizeLogPath(file.sourcePath) ||
-    ""
-  );
+  return typeof raw === "object" && raw !== null ? { ...raw } : {};
 }
 
 async function ensureDist() {
   await _io.directory.remove(DIST_DIR);
-  _log.step("DIST_CLEAN", { target: normalizeLogPath(DIST_DIR) });
   await _io.directory.create(DIST_DIR);
-  _log.step("DIST_READY", { target: normalizeLogPath(DIST_DIR) });
 }
 
-async function buildCss() {
-  const configPath = _io.path.combine(ROOT_DIR, "tailwind.config.js");
-  const sourePath = _io.path.combine(SRC_DIR, "css", "app.css");
-  const distPath = _io.path.combine(DIST_DIR, "output.css");
-  if (!(await _io.file.exists(configPath))) {
-    console.warn(`[build] Skipping CSS pipeline because Tailwind config is missing at ${configPath}. Run 'shevky --init' or create the configuration file manually.`);
-    _log.step("BUILD_CSS_SKIP", { reason: "missing-config", target: normalizeLogPath(configPath) });
-    return;
-  }
-
-  if (!(await _io.file.exists(sourePath))) {
-    console.warn(`[build] Skipping CSS pipeline because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`);
-    _log.step("BUILD_CSS_SKIP", { reason: "missing-source", source: normalizeLogPath(sourePath) });
-    return;
-  }
-  const args = [
-    "@tailwindcss/cli",
-    "-c", configPath,
-    "-i", sourePath,
-    "-o", distPath
-  ];
-
-  if (_cfg.build.minify) {
-    args.push("--minify");
-  }
-
-  await _npm.executeNpx(args, ROOT_DIR);
-  const bundleSize = await _io.file.size(distPath);
-  _log.step("BUILD_CSS", {
-    source: normalizeLogPath(sourePath),
-    target: normalizeLogPath(distPath),
-    output: formatBytes(bundleSize),
-  });
-}
-
-async function buildJs() {
-  const sourePath = _io.path.combine(SRC_DIR, "js", "app.js");
-  const distPath = _io.path.combine(DIST_DIR, "output.js");
-
-  if (!(await _io.file.exists(sourePath))) {
-    console.warn(`[build] Skipping JS bundling because the source file is missing at ${sourePath}. Run 'shevky --init' or create the file manually.`);
-    _log.step("BUILD_JS_SKIP", { reason: "missing-source", source: normalizeLogPath(sourePath) });
-    return;
-  }
-
-  const args = [
-    "esbuild",
-    sourePath,
-    "--bundle", "--format=esm", "--target=es2018",
-    "--outfile=" + distPath,
-  ];
-
-  if (_cfg.build.minify) {
-    args.push("--minify");
-    args.push("--drop:debugger");
-    args.push("--drop:console");
-    args.push("--ignore-annotations");
-    args.push("--sourcemap");
-  }
-
-  await _npm.executeNpx(args, ROOT_DIR);
-  const bundleSize = await _io.file.size(distPath);
-  _log.step("BUILD_JS", {
-    source: normalizeLogPath(sourePath),
-    target: normalizeLogPath(distPath),
-    output: formatBytes(bundleSize),
-  });
-}
-
-async function transformHtml(html) {
-  let output = html
-    .replace(/\/output\.css(\?v=[^"']+)?/g, `/output.css?v=${versionToken}`)
-    .replace(/\/output\.js(\?v=[^"']+)?/g, `/output.js?v=${versionToken}`)
-    .replace(/\b(src|href)="~\//g, '$1="/');
-
-  if (!_cfg.build.minify) {
-    return output;
-  }
-
-  try {
-    output = await minifyHtml(output, {
-      collapseWhitespace: true,
-      collapseBooleanAttributes: true,
-      decodeEntities: true,
-      removeComments: true,
-      removeRedundantAttributes: true,
-      removeScriptTypeAttributes: true,
-      removeStyleLinkTypeAttributes: true,
-      removeEmptyAttributes: false,
-      sortAttributes: true,
-      sortClassName: true,
-      minifyCSS: true,
-      minifyJS: true,
-    });
-  } catch (error) {
-    console.warn("[build] Failed to minify HTML:", error?.message ?? error);
-  }
-
-  return output;
-}
-
-function serializeForInlineScript(value) {
-  return JSON.stringify(value ?? {})
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
-}
-
-function toLocaleArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value.split(",").map((item) => item.trim());
-  }
-
-  return [];
-}
-
-function normalizeAlternateLocales(value, fallback = []) {
-  const primary = toLocaleArray(value);
-  const fallbackList = toLocaleArray(fallback);
-  const source = primary.length ? primary : fallbackList;
-  const seen = new Set();
-
-  return source
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter((item) => {
-      if (!item || seen.has(item)) {
-        return false;
-      }
-
-      seen.add(item);
-      return true;
-    });
-}
-
+/** @param {string} html @param {string[]} locales */
 function injectAlternateLocaleMeta(html, locales) {
   const cleanupPattern =
     /[^\S\r\n]*<meta property="og:locale:alternate" content=".*?" data-og-locale-alt\s*\/?>\s*/g;
@@ -360,7 +181,8 @@ function injectAlternateLocaleMeta(html, locales) {
         `${indent}<meta property="og:locale:alternate" content="${locale}" data-og-locale-alt />`,
     )
     .join("\n");
-  const anchorPattern = /(<meta property="og:locale" content=".*?" data-og-locale\s*\/?>)/;
+  const anchorPattern =
+    /(<meta property="og:locale" content=".*?" data-og-locale\s*\/?>)/;
 
   if (anchorPattern.test(output)) {
     return output.replace(anchorPattern, `$1\n${tags}`);
@@ -369,55 +191,9 @@ function injectAlternateLocaleMeta(html, locales) {
   return `${tags}\n${output}`;
 }
 
-function pickFallbackAlternateLang(lang) {
-  const supported = _i18n.supported;
-  if (!supported.length) {
-    return null;
-  }
-
-  if (supported.length === 1) {
-    return supported[0];
-  }
-
-  if (lang && lang !== _i18n.default) {
-    return _i18n.default;
-  }
-
-  return supported.find((code) => code !== lang) ?? null;
-}
-
-function normalizeAlternateOverrides(alternate, lang) {
-  if (!alternate) {
-    return {};
-  }
-
-  if (typeof alternate === "string" && alternate.trim().length > 0) {
-    const fallbackLang = pickFallbackAlternateLang(lang);
-    if (!fallbackLang) {
-      return {};
-    }
-
-    return { [fallbackLang]: resolveUrl(alternate.trim()) };
-  }
-
-  if (typeof alternate === "object" && !Array.isArray(alternate)) {
-    const map = {};
-    Object.keys(alternate).forEach((code) => {
-      if (!_i18n.supported.includes(code)) {
-        return;
-      }
-      const value = alternate[code];
-      if (typeof value === "string" && value.trim().length > 0) {
-        map[code] = resolveUrl(value.trim());
-      }
-    });
-    return map;
-  }
-
-  return {};
-}
-
+/** @param {string} lang */
 function resolvePaginationSegment(lang) {
+  /** @type {Record<string, string>} */
   const segmentConfig = _cfg?.content?.pagination?.segment ?? {};
   if (
     typeof segmentConfig[lang] === "string" &&
@@ -427,66 +203,14 @@ function resolvePaginationSegment(lang) {
   }
 
   const defaultSegment = segmentConfig[_i18n.default];
-  if (
-    typeof defaultSegment === "string" &&
-    defaultSegment.trim().length > 0
-  ) {
+  if (typeof defaultSegment === "string" && defaultSegment.trim().length > 0) {
     return defaultSegment.trim();
   }
 
   return "page";
 }
 
-function buildAlternateUrlMap(front, lang, canonicalUrl) {
-  const overrides = normalizeAlternateOverrides(front?.alternate, lang);
-  const result = { base: {} };
-
-  _i18n.supported.forEach((code) => {
-    const langConfig = _i18n.build[code];
-    const fallbackPath = code === _i18n.default ? "/" : `/${code}/`;
-    const baseUrl = langConfig?.canonical
-      ? ensureDirectoryTrailingSlash(langConfig.canonical)
-      : resolveUrl(fallbackPath);
-    result.base[code] = baseUrl;
-
-    if (code === lang) {
-      result[code] = canonicalUrl;
-      return;
-    }
-
-    if (overrides[code]) {
-      result[code] = overrides[code];
-      return;
-    }
-
-    if (langConfig?.canonical) {
-      result[code] = langConfig.canonical;
-      return;
-    }
-
-    result[code] = resolveUrl(fallbackPath);
-  });
-
-  result.default = canonicalUrl;
-
-  return result;
-}
-
-function buildAlternateLinkList(alternateMap) {
-  if (!alternateMap) {
-    return [];
-  }
-
-  const baseMap = alternateMap.base ?? {};
-  return _i18n.supported.map((code) => ({
-    lang: code,
-    hreflang: code,
-    url: alternateMap[code] ?? alternateMap.default ?? "",
-    label: _i18n.languageLabel(code),
-    baseUrl: baseMap[code] ?? baseMap[_i18n.default] ?? "",
-  }));
-}
-
+/** @param {unknown} view */
 function buildEasterEggPayload(view) {
   if (!_cfg.build.debug) {
     return "{}";
@@ -497,18 +221,20 @@ function buildEasterEggPayload(view) {
   }
 
   try {
-    return serializeForInlineScript(view);
+    return metaEngine.serializeForInlineScript(view);
   } catch {
     return "{}";
   }
 }
 
+/** @param {string} relativePath @param {string} html @param {{action?: string, source?: string, type?: string, lang?: string, template?: string, items?: number, page?: string | number, inputBytes?: number}} [meta] */
 async function writeHtmlFile(relativePath, html, meta = {}) {
   const destPath = _io.path.combine(DIST_DIR, relativePath);
   await _io.directory.create(_io.path.name(destPath));
   const payload = typeof html === "string" ? html : String(html ?? "");
   await _io.file.write(destPath, payload);
   const outputBytes = byteLength(payload);
+
   _log.step(meta.action ?? "WRITE_HTML", {
     target: normalizeLogPath(destPath),
     source: normalizeLogPath(meta.source),
@@ -517,218 +243,81 @@ async function writeHtmlFile(relativePath, html, meta = {}) {
     template: meta.template,
     items: meta.items,
     page: meta.page,
-    input: typeof meta.inputBytes === "number" ? formatBytes(meta.inputBytes) : undefined,
+    input:
+      typeof meta.inputBytes === "number"
+        ? formatBytes(meta.inputBytes)
+        : undefined,
     output: formatBytes(outputBytes),
   });
 }
 
+async function flushPages() {
+  const pages = pageRegistry
+    .list()
+    .sort((a, b) => (a.outputPath || "").localeCompare(b.outputPath || ""));
+  for (const page of pages) {
+    if (!page.outputPath) {
+      continue;
+    }
+    await writeHtmlFile(page.outputPath, page.html, page.writeMeta ?? {});
+  }
+}
+
+/** @param {string} html @param {string} langKey */
 function applyLanguageMetadata(html, langKey) {
   const config = _i18n.build[langKey];
   if (!config) {
     return html;
   }
 
-  const altLocales = normalizeAlternateLocales(config.altLocale);
+  const altLocales = metaEngine.normalizeAlternateLocales(config.altLocale);
 
   let output = html
     .replace(/(<html\b[^>]*\slang=")(.*?)"/, `$1${config.langAttr}"`)
-    .replace(/(<meta name="language" content=")(.*?)"/, `$1${config.metaLanguage}"`)
-    .replace(/(<link rel="canonical" href=")(.*?)" data-canonical/, `$1${config.canonical}" data-canonical`)
-    .replace(/(<meta property="og:url" content=")(.*?)" data-og-url/, `$1${config.canonical}" data-og-url`)
-    .replace(/(<meta name="twitter:url" content=")(.*?)" data-twitter-url/, `$1${config.canonical}" data-twitter-url`)
-    .replace(/(<meta property="og:locale" content=")(.*?)" data-og-locale/, `$1${config.ogLocale}" data-og-locale`);
+    .replace(
+      /(<meta name="language" content=")(.*?)"/,
+      `$1${config.metaLanguage}"`,
+    )
+    .replace(
+      /(<link rel="canonical" href=")(.*?)" data-canonical/,
+      `$1${config.canonical}" data-canonical`,
+    )
+    .replace(
+      /(<meta property="og:url" content=")(.*?)" data-og-url/,
+      `$1${config.canonical}" data-og-url`,
+    )
+    .replace(
+      /(<meta name="twitter:url" content=")(.*?)" data-twitter-url/,
+      `$1${config.canonical}" data-twitter-url`,
+    )
+    .replace(
+      /(<meta property="og:locale" content=")(.*?)" data-og-locale/,
+      `$1${config.ogLocale}" data-og-locale`,
+    );
 
   output = injectAlternateLocaleMeta(output, altLocales);
   return output;
 }
 
-function ensureDirectoryTrailingSlash(input) {
-  if (typeof input !== "string") {
-    return input;
-  }
-
-  const value = input.trim();
-  if (!value) {
-    return value;
-  }
-
-  const hashIndex = value.indexOf("#");
-  let hash = "";
-  let path = value;
-  if (hashIndex !== -1) {
-    hash = value.slice(hashIndex);
-    path = value.slice(0, hashIndex);
-  }
-
-  const queryIndex = path.indexOf("?");
-  let query = "";
-  if (queryIndex !== -1) {
-    query = path.slice(queryIndex);
-    path = path.slice(0, queryIndex);
-  }
-
-  if (!path || path.endsWith("/")) {
-    return `${path}${query}${hash}`;
-  }
-
-  const lastSlashIndex = path.lastIndexOf("/");
-  const lastSegment = lastSlashIndex >= 0 ? path.slice(lastSlashIndex + 1) : path;
-
-  if (!lastSegment || lastSegment.includes(".") || lastSegment === "~") {
-    return `${path}${query}${hash}`;
-  }
-
-  return `${path}/${query}${hash}`;
-}
-
-function resolveUrl(value) {
-  const trimmedValue = typeof value === "string" ? value.trim() : "";
-  if (!trimmedValue) {
-    return ensureDirectoryTrailingSlash(_cfg.identity.url);
-  }
-
-  if (trimmedValue.startsWith("http://") || trimmedValue.startsWith("https://")) {
-    return ensureDirectoryTrailingSlash(trimmedValue);
-  }
-
-  let absolute;
-  if (trimmedValue.startsWith("~/")) {
-    absolute = `${_cfg.identity.url}/${trimmedValue.slice(2)}`;
-  } else if (trimmedValue.startsWith("/")) {
-    absolute = `${_cfg.identity.url}${trimmedValue}`;
-  } else {
-    absolute = `${_cfg.identity.url}/${trimmedValue}`;
-  }
-
-  const normalized = absolute.replace(/([^:]\/)\/+/g, "$1");
-  return ensureDirectoryTrailingSlash(normalized);
-}
-
-function buildSiteData(lang) {
-  const fallbackOwner = FALLBACK_OWNER;
-  const author = _cfg.identity.author;
-  const owner = _i18n.t(lang, "site.owner", fallbackOwner);
-  const title = _i18n.t(
-    lang,
-    "site.title",
-    FALLBACK_TITLES[lang] ?? FALLBACK_TITLES[_i18n.default] ?? fallbackOwner,
-  );
-
-  const description = _i18n.t(
-    lang,
-    "site.description",
-    FALLBACK_DESCRIPTIONS[lang] ?? FALLBACK_DESCRIPTIONS[_i18n.default] ?? "",
-  );
-
-  const role = _i18n.t(
-    lang,
-    "site.role",
-    FALLBACK_ROLES[lang] ?? FALLBACK_ROLES[_i18n.default] ?? FALLBACK_ROLES.en,
-  );
-
-  const quote = _i18n.t(
-    lang,
-    "site.quote",
-    FALLBACK_QUOTES[lang] ?? FALLBACK_QUOTES[_i18n.default] ?? FALLBACK_QUOTES.en,
-  );
-
-  return {
-    title,
-    description,
-    author,
-    owner,
-    role,
-    quote,
-    home: resolveLanguageHomePath(lang),
-    url: _cfg.identity.url,
-    currentLanguage: lang,
-    currentCulture: _i18n.culture(lang),
-    currentCanonical: (() => {
-      const langConfig = _i18n.build?.[lang];
-      if (langConfig?.canonical) {
-        return langConfig.canonical;
-      }
-      const fallbackPath = lang === _i18n.default ? "/" : `/${lang}/`;
-      return resolveUrl(fallbackPath);
-    })(),
-    currentLangLabel: typeof _i18n.languageLabel === "function"
-      ? _i18n.languageLabel(lang)
-      : lang,
-    themeColor: _cfg.identity.themeColor,
-    analyticsEnabled: _analytics.enabled,
-    gtmId: _analytics.google.gtm,
-    year: new Date().getFullYear(),
-    languages: {
-      supported: _i18n.supported,
-      default: _i18n.default,
-      canonical: (_cfg?.content?.languages?.canonical && typeof _cfg.content.languages.canonical === "object")
-        ? _cfg.content.languages.canonical
-        : {},
-      canonicalUrl: _i18n.supported.reduce((acc, code) => {
-        const langConfig = _i18n.build?.[code];
-        if (langConfig?.canonical) {
-          acc[code] = langConfig.canonical;
-        }
-        return acc;
-      }, {}),
-      cultures: _i18n.supported.reduce((acc, code) => {
-        acc[code] = _i18n.culture(code);
-        return acc;
-      }, {}),
-    },
-    languagesCsv: _i18n.supported.join(","),
-    defaultLanguage: _i18n.default,
-    pagination: {
-      pageSize: _cfg.content.pagination.pageSize
-    },
-    features: {
-      postOperations: _cfg.features.postOperations,
-      search: _cfg.features.search
-    },
-  };
-}
-
-function getMenuData(lang, activeKey) {
-  const baseItems = MENU_ITEMS[lang] ?? MENU_ITEMS[_i18n.default] ?? [];
-  const normalizedActiveKey =
-    typeof activeKey === "string" && activeKey.trim().length > 0 ? activeKey.trim() : null;
-  const hasExplicitMatch = normalizedActiveKey
-    ? baseItems.some((item) => item.key === normalizedActiveKey)
-    : false;
-  const resolvedActiveKey = hasExplicitMatch
-    ? normalizedActiveKey
-    : baseItems[0]?.key ?? "";
-  const items = baseItems.map((item) => ({
-    ...item,
-    label: _i18n.t(lang, `menu.${item.key}`, item.label ?? item.key),
-    isActive: item.key === resolvedActiveKey,
-  }));
-  return { items, activeKey: resolvedActiveKey };
-}
-
-function resolveActiveMenuKey(frontMatter) {
-  if (!frontMatter) return null;
-  if (typeof frontMatter.id === "string" && frontMatter.id.trim().length > 0) {
-    return frontMatter.id.trim();
-  }
-  if (typeof frontMatter.slug === "string" && frontMatter.slug.trim().length > 0) {
-    return frontMatter.slug.trim();
-  }
-  return null;
-}
-
+/** @param {string} key @param {string} lang */
 function buildTagSlug(key, lang) {
   if (!key) {
     return null;
   }
 
+  /** @type {any} */
   const tagsConfig = _cfg.content.collections.tags;
   const slugPattern =
-    tagsConfig && typeof tagsConfig.slugPattern === "object" ? tagsConfig.slugPattern : {};
+    tagsConfig && typeof tagsConfig.slugPattern === "object"
+      ? /** @type {Record<string, string>} */ (tagsConfig.slugPattern)
+      : {};
 
-  const langPattern = typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
+  const langPattern =
+    typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
   if (langPattern) {
-    return langPattern.includes("{{key}}") ? langPattern.replace("{{key}}", key) : langPattern;
+    return langPattern.includes("{{key}}")
+      ? langPattern.replace("{{key}}", key)
+      : langPattern;
   }
 
   if (lang === "en") {
@@ -742,15 +331,17 @@ function buildTagSlug(key, lang) {
   return key;
 }
 
+/** @param {string} key @param {string} lang */
 function buildTagUrlFromKey(key, lang) {
   const slug = buildTagSlug(key, lang);
   if (!slug) {
     return null;
   }
 
-  return buildContentUrl(null, lang, slug);
+  return metaEngine.buildContentUrl(null, lang, slug);
 }
 
+/** @param {string} label @param {string} lang */
 function buildTagUrlFromLabel(label, lang) {
   const key = _fmt.slugify(label);
   if (!key) {
@@ -760,9 +351,11 @@ function buildTagUrlFromLabel(label, lang) {
   return buildTagUrlFromKey(key, lang);
 }
 
+/** @param {string} lang */
 function buildFooterTags(lang) {
   const langCollections = PAGES[lang] ?? {};
   const limit = _cfg.seo.footerTagCount;
+  /** @type {Array<{ key: string, count: number, url: string }>} */
   const results = [];
   Object.keys(langCollections).forEach((key) => {
     const items = langCollections[key] ?? [];
@@ -798,10 +391,16 @@ function buildFooterTags(lang) {
   return results;
 }
 
+/** @param {string} lang */
 function getFooterData(lang) {
-  const policiesSource = FOOTER_POLICIES[lang] ?? FOOTER_POLICIES[_i18n.default] ?? [];
+  const policiesSource =
+    FOOTER_POLICIES[lang] ?? FOOTER_POLICIES[_i18n.default] ?? [];
   const tagsSource = buildFooterTags(lang);
-  const social = _social.get().map((item) => {
+  const socialSource =
+    /** @type {Array<{ key: string, url: string, icon?: string }>} */ (
+      Array.isArray(_social.get()) ? _social.get() : []
+    );
+  const social = socialSource.filter(Boolean).map((item) => {
     let url = item.url;
     if (item.key === "rss") {
       url = lang === _i18n.default ? "/feed.xml" : `/${lang}/feed.xml`;
@@ -817,18 +416,24 @@ function getFooterData(lang) {
 
   const tags = tagsSource.map((tag) => ({
     ...tag,
-    label: _i18n.t(lang, `footer.tags.${tag.key}`, tag.label ?? tag.key),
+    label: _i18n.t(lang, `footer.tags.${tag.key}`, tag.key),
   }));
 
   const policies = policiesSource.map((policy) => ({
     ...policy,
-    label: _i18n.t(lang, `footer.policies.${policy.key}`, policy.label ?? policy.key),
+    label: _i18n.t(
+      lang,
+      `footer.policies.${policy.key}`,
+      policy.label ?? policy.key,
+    ),
   }));
 
   const tagline = _i18n.t(
     lang,
     "footer.tagline",
-    FALLBACK_TAGLINES[lang] ?? FALLBACK_TAGLINES[_i18n.default] ?? FALLBACK_TAGLINES.en,
+    FALLBACK_TAGLINES[lang] ??
+      FALLBACK_TAGLINES[_i18n.default] ??
+      FALLBACK_TAGLINES.en,
   );
 
   return {
@@ -839,301 +444,33 @@ function getFooterData(lang) {
   };
 }
 
-function buildPageMeta(front, lang, slug) {
-  const canonicalUrl = resolveUrl(front.canonical ?? defaultCanonical(lang, slug));
-  const langConfig = _i18n.build[lang] ?? {};
-  const pageTitleSource =
-    typeof front.metaTitle === "string" && front.metaTitle.trim().length > 0
-      ? front.metaTitle.trim()
-      : typeof front.title === "string" && front.title.trim().length > 0
-        ? front.title.trim()
-        : "Untitled";
-  const ogLocale = langConfig.ogLocale ?? _i18n.culture(lang);
-  const defaultAltLocales =
-    langConfig.altLocale ??
-    _i18n.supported
-      .filter((code) => code !== lang)
-      .map((code) => _i18n.culture(code));
-  const altLocales = normalizeAlternateLocales(front.ogAltLocale, defaultAltLocales);
-  const coverSource =
-    typeof front.cover === "string" && front.cover.trim().length > 0
-      ? front.cover.trim()
-      : DEFAULT_IMAGE;
-  const ogImage = resolveUrl(coverSource);
-  const alternates = buildAlternateUrlMap(front, lang, canonicalUrl);
-  const alternateLinks = buildAlternateLinkList(alternates);
-  const twitterImage = resolveUrl(coverSource);
-
-  const typeValue = typeof front.type === "string" ? front.type.trim().toLowerCase() : "";
-  const templateValue = typeof front.template === "string" ? front.template.trim().toLowerCase() : "";
-  const isArticle =
-    templateValue === "post" ||
-    typeValue === "article" ||
-    typeValue === "guide" ||
-    typeValue === "post";
-
-  let structuredData = null;
-  if (isArticle) {
-    structuredData = buildArticleStructuredData(front, lang, canonicalUrl, ogImage);
-  } else if (templateValue === "home") {
-    structuredData = buildHomeStructuredData(front, lang, canonicalUrl);
-  } else if (templateValue === "page") {
-    structuredData = buildWebPageStructuredData(front, lang, canonicalUrl);
-  }
-  else {
-    structuredData = buildWebPageStructuredData(front, lang, canonicalUrl);
-  }
-
-  const ogType = front.ogType ?? (isArticle ? "article" : "website");
-
-  return {
-    title: pageTitleSource,
-    description: front.description ?? "",
-    robots: front.robots ?? "index,follow",
-    canonical: canonicalUrl,
-    alternates,
-    alternateLinks,
-    og: {
-      title: front.ogTitle ?? pageTitleSource,
-      description: front.description ?? "",
-      type: ogType,
-      url: canonicalUrl,
-      image: ogImage,
-      locale: front.ogLocale ?? ogLocale,
-      altLocale: altLocales,
-    },
-    twitter: {
-      card: front.twitterCard ?? "summary_large_image",
-      title: front.twitterTitle ?? pageTitleSource,
-      description: front.description ?? "",
-      image: twitterImage,
-      url: canonicalUrl,
-    },
-    structuredData,
-  };
-}
-
-function resolveArticleSection(front, lang) {
-  const rawCategory = typeof front.category === "string" ? front.category.trim().toLowerCase() : "";
-  if (!rawCategory) return "";
-  if (lang === "tr") {
-    if (rawCategory === "yasam-ogrenme") return "Yaşam & Öğrenme";
-    if (rawCategory === "teknik-notlar") return "Teknik Notlar";
-  }
-  if (lang === "en") {
-    if (rawCategory === "life-learning") return "Life & Learning";
-    if (rawCategory === "technical-notes") return "Technical Notes";
-  }
-  return rawCategory;
-}
-
-function buildArticleStructuredData(front, lang, canonicalUrl, ogImageUrl) {
-  const authorName = _cfg.identity.author;
-  const articleSection = resolveArticleSection(front, lang);
-  const keywordsArray = Array.isArray(front.keywords) && front.keywords.length
-    ? front.keywords
-    : Array.isArray(front.tags) && front.tags.length
-      ? front.tags
-      : [];
-
-  const structured = {
-    "@context": "https://schema.org",
-    "@type": "Article",
-    headline: front.title ?? "",
-    description: front.description ?? "",
-    author: {
-      "@type": "Person",
-      name: authorName,
-      url: _cfg.identity.url
-    },
-    publisher: {
-      "@type": "Person",
-      name: authorName,
-      url: _cfg.identity.url
-    },
-    inLanguage: lang,
-    mainEntityOfPage: {
-      "@type": "WebPage",
-      "@id": canonicalUrl
-    },
-  };
-
-  if (front.date) {
-    structured.datePublished = _fmt.lastMod(front.date, front.lang);
-  }
-
-  if (front.updated) {
-    structured.dateModified = _fmt.lastMod(front.updated);
-  }
-
-  if (ogImageUrl) {
-    structured.image = [ogImageUrl];
-  }
-
-  if (articleSection) {
-    structured.articleSection = articleSection;
-  }
-
-  if (keywordsArray.length) {
-    structured.keywords = keywordsArray;
-  }
-
-  return serializeForInlineScript(structured);
-}
-
-function buildHomeStructuredData(front, lang, canonicalUrl) {
-  const siteData = buildSiteData(lang);
-  const authorName = _cfg.identity.author;
-  const structured = {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    name: siteData.title ?? "",
-    url: canonicalUrl,
-    inLanguage: lang,
-    description: siteData.description ?? "",
-    publisher: {
-      "@type": "Person",
-      name: authorName,
-      url: _cfg.identity.url,
-      sameAs: [
-        _cfg.identity.social.devto,
-        _cfg.identity.social.facebook,
-        _cfg.identity.social.github,
-        _cfg.identity.social.instagram,
-        _cfg.identity.social.linkedin,
-        _cfg.identity.social.mastodon,
-        _cfg.identity.social.medium,
-        _cfg.identity.social.stackoverflow,
-        _cfg.identity.social.substack,
-        _cfg.identity.social.tiktok,
-        _cfg.identity.social.x,
-        _cfg.identity.social.youtube
-      ].filter((i) => i && i.trim().length > 0)
-    },
-  };
-  return serializeForInlineScript(structured);
-}
-
-function buildWebPageStructuredData(front, lang, canonicalUrl) {
-  const authorName = _cfg.identity.author;
-  const keywordsArray = Array.isArray(front.keywords) && front.keywords.length
-    ? front.keywords
-    : Array.isArray(front.tags) && front.tags.length
-      ? front.tags
-      : [];
-  const isPolicy = front.category && front.category.trim().length > 0 ? _fmt.boolean(front.category.trim() === "policy") : false;
-  const isAboutPage = front.type && front.type.trim().length > 0 ? _fmt.boolean(front.type.trim() === "about") : false;
-  const isContactPage = front.type && front.type.trim().length > 0 ? _fmt.boolean(front.type.trim() === "contact") : false;
-  const collectionType = front.collectionType && front.collectionType.trim().length > 0 ? front.collectionType.trim() : "";
-  const isCollectionPage = collectionType === "tag" || collectionType === "category" || collectionType === "series";
-  const socialProfileArray = [
-    _cfg.identity.social.devto,
-    _cfg.identity.social.facebook,
-    _cfg.identity.social.github,
-    _cfg.identity.social.instagram,
-    _cfg.identity.social.linkedin,
-    _cfg.identity.social.mastodon,
-    _cfg.identity.social.medium,
-    _cfg.identity.social.stackoverflow,
-    _cfg.identity.social.substack,
-    _cfg.identity.social.tiktok,
-    _cfg.identity.social.x,
-    _cfg.identity.social.youtube
-  ].filter((i) => i && i.trim().length > 0);
-  const collectionDescription = isCollectionPage ?
-    collectionType === "tag" ? _i18n.t(lang, "seo.collections.tags.description", "").replace("{{label}}", front.listKey) :
-      collectionType === "category" ? _i18n.t(lang, "seo.collections.category.description", "").replace("{{label}}", front.listKey) :
-        collectionType === "series" ? _i18n.t(lang, "seo.collections.series.description", "").replace("{{label}}", front.listKey) :
-          "" : "";
-
-  const structured = {
-    "@context": "https://schema.org",
-    "@type": isAboutPage ? "AboutPage" : isContactPage ? "ContactPage" : isCollectionPage ? "CollectionPage" : "WebPage",
-    headline: front.title ?? "",
-    description: front.description ? front.description : isCollectionPage ? collectionDescription : "",
-    publisher: {
-      "@type": "Person",
-      name: authorName,
-      url: _cfg.identity.url
-    },
-    inLanguage: lang,
-    mainEntityOfPage: {
-      "@type": "WebPage",
-      "@id": canonicalUrl
-    },
-    ...isPolicy ? { about: { "@type": "Thing", name: "Website Legal Information" } } : {},
-    ...isAboutPage ? {
-      about: {
-        "@type": "Person", name: _cfg.identity.author, url: _cfg.identity.url, sameAs: socialProfileArray
-      }
-    } : {},
-    ...isContactPage ? {
-      about: {
-        "@type": "Person", name: _cfg.identity.author, url: _cfg.identity.url
-      },
-      contactPoint: { "@type": "ContactPoint", "contactType": "general inquiry", "email": _cfg.identity.email }
-    } : {}
-  };
-
-  if (keywordsArray.filter((i) => i && i.trim().length > 0).length) {
-    structured.keywords = keywordsArray.filter((i) => i && i.trim().length > 0);
-  }
-
-  return serializeForInlineScript(structured);
-}
-
-function defaultCanonical(lang, slug) {
-  const cleanedSlug = (slug ?? "").replace(/^\/+/, "").replace(/\/+$/, "");
-  const langConfig = _i18n.build[lang];
-  let base = langConfig?.canonical;
-  if (!base) {
-    const fallbackPath = lang === _i18n.default ? "/" : `/${lang}/`;
-    base = resolveUrl(fallbackPath);
-  }
-
-  const normalizedBase = base.replace(/\/+$/, "/");
-  if (!cleanedSlug) {
-    return normalizedBase;
-  }
-
-  return `${normalizedBase}${cleanedSlug}/`;
-}
-
-function canonicalToRelativePath(value) {
-  if (!value) return null;
-  let path = value;
-  if (path.startsWith("~/")) {
-    path = path.slice(2);
-  } else if (/^https?:\/\//i.test(path)) {
-    path = path.replace(/^https?:\/\/[^/]+/i, "");
-  }
-  path = path.trim();
-  if (!path) return null;
-  return path.replace(/^\/+/, "").replace(/\/+$/, "");
-}
-
-function resolveLanguageHomePath(lang) {
-  if (typeof _i18n.homePath === "function") {
-    const resolved = _i18n.homePath(lang);
-    if (resolved && typeof resolved === "string") {
-      return resolved;
-    }
-  }
-
-  if (!lang || lang === _i18n.default) {
-    return "/";
-  }
-
-  return `/${lang}/`.replace(/\/+/g, "/");
-}
-
-async function renderContentTemplate(templateName, contentHtml, front, lang, dictionary, listingOverride) {
-  const template = _core.templates.get(templateName);
+/**
+ * @param {string} templateName
+ * @param {string} contentHtml
+ * @param {FrontMatter} front
+ * @param {string} lang
+ * @param {Record<string, any>} dictionary
+ * @param {any} [listingOverride]
+ */
+async function renderContentTemplate(
+  templateName,
+  contentHtml,
+  front,
+  lang,
+  dictionary,
+  listingOverride,
+) {
+  const template = templateRegistry.getTemplate(TYPE_TEMPLATE, templateName);
+  const baseFront = normalizeFrontMatter(front);
+  /** @type {string[]} */
   const normalizedTags = Array.isArray(front.tags)
-    ? front.tags.filter((tag) => typeof tag === "string" && tag.trim().length > 0)
+    ? front.tags.filter(
+        (/** @type {string} */ tag) =>
+          typeof tag === "string" && tag.trim().length > 0,
+      )
     : [];
   const tagLinks = normalizedTags
-    .map((tag) => {
+    .map((/** @type {string} */ tag) => {
       const url = buildTagUrlFromLabel(tag, lang);
       return url ? { label: tag, url } : null;
     })
@@ -1142,10 +479,12 @@ async function renderContentTemplate(templateName, contentHtml, front, lang, dic
     typeof front.category === "string" && front.category.trim().length > 0
       ? _fmt.slugify(front.category)
       : "";
-  const categoryUrl = categorySlug ? buildContentUrl(null, lang, categorySlug) : null;
+  const categoryUrl = categorySlug
+    ? metaEngine.buildContentUrl(null, lang, categorySlug)
+    : null;
   const resolvedDictionary = dictionary ?? _i18n.get(lang);
-  const normalizedFront = {
-    ...front,
+  const normalizedFront = /** @type {FrontMatter} */ ({
+    ...baseFront,
     tags: normalizedTags,
     tagLinks,
     hasTags: normalizedTags.length > 0,
@@ -1159,170 +498,95 @@ async function renderContentTemplate(templateName, contentHtml, front, lang, dic
     cover: front.cover ?? DEFAULT_IMAGE,
     coverAlt: front.coverAlt ?? "",
     lang,
-  };
+  });
   if (front?.collectionType) {
-    normalizedFront.collectionType = normalizeCollectionTypeValue(front.collectionType);
+    normalizedFront.collectionType = normalizeCollectionTypeValue(
+      front.collectionType,
+    );
   }
   normalizedFront.seriesListing = buildSeriesListing(normalizedFront, lang);
-  const listing = listingOverride ?? buildCollectionListing(normalizedFront, lang);
+  const listing =
+    listingOverride ?? buildCollectionListing(normalizedFront, lang);
   const collectionFlags = buildCollectionTypeFlags(
     listing?.type ?? resolveCollectionType(normalizedFront, listing?.items),
   );
-  const site = buildSiteData(lang);
+  const site = metaEngine.buildSiteData(lang);
   const languageFlags = _i18n.flags(lang);
-  return Mustache.render(template, {
-    content: { html: decorateHtml(contentHtml, templateName) },
-    front: normalizedFront,
-    lang,
-    listing,
-    site,
-    locale: languageFlags.locale,
-    isEnglish: languageFlags.isEnglish,
-    isTurkish: languageFlags.isTurkish,
-    i18n: resolvedDictionary,
-    ...collectionFlags,
-  }, {
-    ..._core.partials.files,
-    ..._core.components.files,
-  });
-}
 
-function buildContentComponentContext(frontMatter, lang, dictionary) {
-  const normalizedLang = lang ?? _i18n.default;
-  const languageFlags = _i18n.flags(normalizedLang);
-  return {
-    front: frontMatter ?? {},
-    lang: normalizedLang,
-    i18n: dictionary ?? {},
-    pages: PAGES[normalizedLang] ?? {},
-    allPages: PAGES,
-    locale: languageFlags.locale,
-    isEnglish: languageFlags.isEnglish,
-    isTurkish: languageFlags.isTurkish,
-  };
-}
-
-function buildViewPayload({ lang, activeMenuKey, pageMeta, content, dictionary }) {
-  const languageFlags = _i18n.flags(lang);
-  const view = {
-    lang,
-    locale: languageFlags.locale,
-    isEnglish: languageFlags.isEnglish,
-    isTurkish: languageFlags.isTurkish,
-    theme: "light",
-    site: buildSiteData(lang),
-    menu: getMenuData(lang, activeMenuKey),
-    footer: getFooterData(lang),
-    pages: PAGES,
-    i18n: dictionary,
-    i18nInline: _i18n.serialize(),
-    page: pageMeta,
-    content,
-    scripts: {
-      analytics: _analytics.snippets,
-      body: [],
+  return Mustache.render(
+    template.content,
+    {
+      content: { html: decorateHtml(contentHtml, templateName) },
+      front: normalizedFront,
+      lang,
+      listing,
+      site,
+      locale: languageFlags.locale,
+      isEnglish: languageFlags.isEnglish,
+      isTurkish: languageFlags.isTurkish,
+      i18n: resolvedDictionary,
+      ...collectionFlags,
     },
-  };
-  view.easterEgg = buildEasterEggPayload(view);
-  return view;
+    {
+      ...templateRegistry.getFiles(TYPE_PARTIAL),
+      ...templateRegistry.getFiles(TYPE_COMPONENT),
+    },
+  );
 }
 
+/**
+ * @param {FrontMatter} frontMatter
+ * @param {string} lang
+ * @param {Record<string, any>} dictionary
+ */
+/**
+ * @param {{ layoutName: string, view: Record<string, any>, front: FrontMatter, lang: string, slug: string, writeMeta?: { action?: string, source?: string, type?: string, lang?: string, template?: string, items?: number, page?: string | number, inputBytes?: number } }} input
+ */
 async function renderPage({ layoutName, view, front, lang, slug, writeMeta }) {
-  const layoutTemplate = _core.layouts.get(layoutName);
-  const rendered = Mustache.render(layoutTemplate, view, {
-    ..._core.partials.files,
-    ..._core.components.files,
+  const rendered = renderEngine.renderLayout(layoutName, view);
+  const finalHtml = await renderEngine.transformHtml(rendered, {
+    versionToken,
+    minifyHtml,
   });
-  const finalHtml = await transformHtml(rendered);
   const relativePath = buildOutputPath(front, lang, slug);
-  await writeHtmlFile(relativePath, finalHtml, writeMeta);
+  const page = renderEngine.createPage({
+    kind: "page",
+    type:
+      typeof writeMeta?.type === "string" && writeMeta.type.length > 0
+        ? writeMeta.type
+        : typeof front?.template === "string"
+          ? front.template
+          : "",
+    lang,
+    slug,
+    canonical: metaEngine.buildContentUrl(front?.canonical, lang, slug),
+    layout: layoutName,
+    template: typeof front?.template === "string" ? front.template : "",
+    front,
+    view,
+    html: finalHtml,
+    sourcePath: typeof writeMeta?.source === "string" ? writeMeta.source : "",
+    outputPath: relativePath,
+    writeMeta,
+  });
   GENERATED_PAGES.add(toPosixPath(relativePath));
   registerLegacyPaths(lang, slug);
-  return relativePath;
+  return page;
 }
 
-function renderMarkdownComponents(markdown, context = {}) {
-  if (!markdown || typeof markdown !== "string") {
-    return { markdown: markdown ?? "", placeholders: [] };
-  }
-  const placeholders = [];
-  const baseContext = context ?? {};
-  const writer = new Mustache.Writer();
-  const originalRenderPartial = writer.renderPartial;
-
-  writer.renderPartial = function renderPartial(token, tokenContext, partials, config) {
-    const name = token?.[1];
-    if (name?.startsWith("components/")) {
-      const template = _core.components.files[name];
-      if (!template) return "";
-      const tokenId = `COMPONENT_SLOT_${placeholders.length}_${name.replace(/[^A-Za-z0-9_-]/g, "_")}_${crypto
-        .randomBytes(4)
-        .toString("hex")}`;
-      const comment = `<!--${tokenId}-->`;
-      const marker = `\n${comment}\n`;
-      const tags = this.getConfigTags(config);
-      const tokens = this.parse(template, tags);
-      const html = this.renderTokens(tokens, tokenContext, partials, template, config);
-      placeholders.push({ token: tokenId, marker, html });
-      return marker;
-    }
-
-    return originalRenderPartial.call(this, token, tokenContext, partials, config);
-  };
-
-  let renderedMarkdown = writer.render(markdown, baseContext, {
-    ..._core.partials.files,
-    ..._core.components.files,
-  });
-
-  placeholders.forEach(({ token }) => {
-    const marker = `<!--${token}-->`;
-    const pattern = new RegExp(`^[ \\t]*${escapeRegExp(marker)}[ \\t]*$`, "gm");
-    renderedMarkdown = renderedMarkdown.replace(pattern, marker);
-  });
-
-  return { markdown: renderedMarkdown, placeholders };
-}
-
-function escapeRegExp(value = "") {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function injectMarkdownComponents(html, placeholders) {
-  if (!html || !placeholders || !placeholders.length) {
-    return html;
-  }
-  let output = html;
-  for (let i = placeholders.length - 1; i >= 0; i -= 1) {
-    const { token, marker, html: snippet } = placeholders[i];
-    const safeSnippet = snippet ?? "";
-    let nextOutput = output;
-
-    if (token) {
-      const pattern = new RegExp(`(?:<p>)?\\s*<!--${escapeRegExp(token)}-->\\s*(?:</p>)?`, "g");
-      const replaced = nextOutput.replace(pattern, safeSnippet);
-      nextOutput = replaced;
-    }
-
-    if (nextOutput === output && marker) {
-      nextOutput = nextOutput.split(marker).join(safeSnippet);
-    }
-
-    output = nextOutput;
-  }
-  return output;
-}
-
+/** @param {string} html @param {string} templateName */
 function decorateHtml(html, templateName) {
   return html;
 }
 
+/** @param {FrontMatter} front @param {string} lang @param {string} slug */
 function buildOutputPath(front, lang, slug) {
-  const canonicalRelative = canonicalToRelativePath(front.canonical);
+  const canonicalRelative = metaEngine.canonicalToRelativePath(front.canonical);
   if (canonicalRelative) {
     return _io.path.combine(canonicalRelative, "index.html");
   }
   const cleaned = (slug ?? "").replace(/^\/+/, "");
+  /** @type {string[]} */
   const segments = [];
   if (lang && lang !== _i18n.default) {
     segments.push(lang);
@@ -1333,140 +597,18 @@ function buildOutputPath(front, lang, slug) {
   return _io.path.combine(...segments.filter(Boolean), "index.html");
 }
 
+/** @param {string} value */
 function toPosixPath(value) {
-  return value.split(_io.path.seperator).join("/");
+  return value.split(_io.path.separator).join("/");
 }
 
-function buildContentUrl(canonical, lang, slug) {
-  const normalizedLang = lang ?? _i18n.default;
-  if (typeof canonical === "string" && canonical.trim().length > 0) {
-    const trimmedCanonical = canonical.trim();
-    const relative = canonicalToRelativePath(trimmedCanonical);
-    if (relative) {
-      const normalizedRelative = `/${relative}`.replace(/\/+/g, "/");
-      return ensureDirectoryTrailingSlash(normalizedRelative);
-    }
-
-    return ensureDirectoryTrailingSlash(trimmedCanonical);
-  }
-  const fallback = canonicalToRelativePath(defaultCanonical(normalizedLang, slug));
-  if (fallback) {
-    const normalizedFallback = `/${fallback}`.replace(/\/+/g, "/");
-    return ensureDirectoryTrailingSlash(normalizedFallback);
-  }
-  const slugSegment = slug ? `/${slug}` : "/";
-  if (normalizedLang !== _i18n.default) {
-    const langPath = `/${normalizedLang}${slugSegment}`.replace(/\/+/g, "/");
-    return ensureDirectoryTrailingSlash(langPath);
-  }
-
-  const normalizedSlug = slugSegment.replace(/\/+/g, "/");
-  return ensureDirectoryTrailingSlash(normalizedSlug);
-}
-
-async function buildFooterPoliciesFromContent() {
-  if (_core.contents.count === 0) {
-    return {};
-  }
-
-  const policiesByLang = {};
-  for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished || file.category !== "policy") {
-      continue;
-    }
-
-    const policy = {
-      lang: file.lang,
-      key: file.id,
-      label: file.menuLabel,
-      url: buildContentUrl(file.canonical, file.lang, file.slug),
-    };
-
-    if (!Array.isArray(policiesByLang[file.lang])) {
-      policiesByLang[file.lang] = [];
-    }
-
-    policiesByLang[file.lang].push(policy);
-  }
-
-  Object.keys(policiesByLang).forEach((lang) => {
-    policiesByLang[lang].sort((a, b) => a.label.localeCompare(b.label, lang));
-  });
-
-  return policiesByLang;
-}
-
-async function buildContentIndex() {
-  if (_core.contents.count === 0) {
-    return {};
-  }
-
-  const index = {};
-  for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished || !file.id) {
-      continue;
-    }
-
-    if (!index[file.id]) {
-      index[file.id] = {};
-    }
-
-    index[file.id][file.lang] = {
-      id: file.id,
-      lang: file.lang,
-      title: file.title,
-      canonical: buildContentUrl(file.canonical, file.lang, file.slug),
-    };
-  }
-
-  return index;
-}
-
-async function buildCategoryTagCollections() {
-  if (_core.contents.count === 0) {
-    return {};
-  }
-
-  const pagesByLang = {};
-  for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished) {
-      continue;
-    }
-
-    const summary = {
-      ...file.summary,
-      canonical: buildContentUrl(file.canonical, file.lang, file.slug)
-    };
-    const langStore = pagesByLang[file.lang] ?? (pagesByLang[file.lang] = {});
-
-    if (file.isPostTemplate && file.isFeatured) {
-      addCollectionEntry(langStore, "home", summary, "home");
-    }
-
-    if (file.category) {
-      addCollectionEntry(langStore, file.category, summary, "category");
-    }
-
-    for (const tag of file.tags) {
-      addCollectionEntry(langStore, tag, summary, "tag");
-    }
-
-    if (file.series) {
-      addCollectionEntry(langStore, file.series, {
-        ...summary,
-        seriesTitle: file.seriesTitle
-      }, "series");
-    }
-  }
-
-  return sortCollectionEntries(pagesByLang);
-}
-
+/** @param {FrontMatter} front @param {string} lang */
 function buildCollectionListing(front, lang) {
   const normalizedLang = lang ?? _i18n.default;
   const langCollections = PAGES[normalizedLang] ?? {};
   const key = resolveListingKey(front);
-  const sourceItems = key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
+  const sourceItems =
+    key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
   const items = dedupeCollectionItems(sourceItems);
   const collectionType = resolveCollectionType(front, items);
   const typeFlags = buildCollectionTypeFlags(collectionType);
@@ -1482,17 +624,22 @@ function buildCollectionListing(front, lang) {
   };
 }
 
+/** @param {FrontMatter} front @param {string} lang */
 function buildSeriesListing(front, lang) {
+  /** @type {string[]} */
   const relatedSource = Array.isArray(front?.related) ? front.related : [];
-  const seriesName = typeof front?.seriesTitle === "string" && front.seriesTitle.trim().length > 0
-    ? front.seriesTitle.trim()
-    : typeof front?.series === "string"
-      ? front.series.trim()
-      : "";
+  const seriesName =
+    typeof front?.seriesTitle === "string" &&
+    front.seriesTitle.trim().length > 0
+      ? front.seriesTitle.trim()
+      : typeof front?.series === "string"
+        ? front.series.trim()
+        : "";
   const currentId = typeof front?.id === "string" ? front.id.trim() : "";
+  /** @type {Array<{ id: string, label: string, url: string, hasUrl?: boolean, isCurrent: boolean, isPlaceholder: boolean }>} */
   const items = [];
 
-  relatedSource.forEach((entry) => {
+  relatedSource.forEach((/** @type {string} */ entry) => {
     const value = typeof entry === "string" ? entry.trim() : "";
     if (!value) {
       items.push({
@@ -1510,9 +657,17 @@ function buildSeriesListing(front, lang) {
     const summaryLang = lang || front?.lang;
     let summary = null;
     if (summaryLookup) {
-      summary = summaryLookup[summaryLang] ?? summaryLookup[front?.lang] ?? Object.values(summaryLookup)[0];
+      const summaryFallback =
+        /** @type {{ title?: string, canonical?: string }} */ (
+          Object.values(summaryLookup)[0]
+        );
+      summary =
+        summaryLookup[summaryLang] ??
+        summaryLookup[front?.lang] ??
+        summaryFallback;
     }
-    const label = summary?.title ?? (isCurrent ? front?.title ?? value : value);
+    const label =
+      summary?.title ?? (isCurrent ? (front?.title ?? value) : value);
     const url = summary?.canonical ?? "";
 
     const hasUrl = typeof url === "string" && url.length > 0;
@@ -1534,6 +689,7 @@ function buildSeriesListing(front, lang) {
   };
 }
 
+/** @param {unknown} value */
 function normalizeCollectionTypeValue(value) {
   if (typeof value !== "string") {
     return "";
@@ -1541,6 +697,7 @@ function normalizeCollectionTypeValue(value) {
   return value.trim().toLowerCase();
 }
 
+/** @param {FrontMatter} front @param {CollectionEntry[] | undefined} items @param {string} [fallback] */
 function resolveCollectionType(front, items, fallback) {
   const explicitCandidate =
     normalizeCollectionTypeValue(front?.collectionType) ||
@@ -1552,10 +709,13 @@ function resolveCollectionType(front, items, fallback) {
 
   if (Array.isArray(items)) {
     const entryWithType = items.find(
-      (entry) => typeof entry?.type === "string" && entry.type.trim().length > 0,
+      (entry) =>
+        typeof entry?.type === "string" && entry.type.trim().length > 0,
     );
-    if (entryWithType) {
-      return entryWithType.type.trim().toLowerCase();
+    const entryType =
+      typeof entryWithType?.type === "string" ? entryWithType.type.trim() : "";
+    if (entryType) {
+      return entryType.toLowerCase();
     }
   }
 
@@ -1566,6 +726,7 @@ function resolveCollectionType(front, items, fallback) {
   return "";
 }
 
+/** @param {string} type */
 function buildCollectionTypeFlags(type) {
   const normalized = normalizeCollectionTypeValue(type);
   return {
@@ -1578,6 +739,7 @@ function buildCollectionTypeFlags(type) {
   };
 }
 
+/** @param {FrontMatter} front */
 function resolveListingKey(front) {
   if (!front) return "";
   const candidates = [
@@ -1596,6 +758,7 @@ function resolveListingKey(front) {
   return "";
 }
 
+/** @param {FrontMatter} front @param {string} lang */
 function resolveListingEmpty(front, lang) {
   if (!front) return "";
   const { listingEmpty } = front;
@@ -1603,11 +766,14 @@ function resolveListingEmpty(front, lang) {
     return listingEmpty.trim();
   }
   if (listingEmpty && typeof listingEmpty === "object") {
-    const localized = listingEmpty[lang];
+    const listingEmptyMap = /** @type {Record<string, string>} */ (
+      listingEmpty
+    );
+    const localized = listingEmptyMap[lang];
     if (typeof localized === "string" && localized.trim().length > 0) {
       return localized.trim();
     }
-    const fallback = listingEmpty[_i18n.default];
+    const fallback = listingEmptyMap[_i18n.default];
     if (typeof fallback === "string" && fallback.trim().length > 0) {
       return fallback.trim();
     }
@@ -1615,9 +781,13 @@ function resolveListingEmpty(front, lang) {
   return "";
 }
 
+/** @param {FrontMatter} front */
 function resolveListingHeading(front) {
   if (!front) return "";
-  if (typeof front.listHeading === "string" && front.listHeading.trim().length > 0) {
+  if (
+    typeof front.listHeading === "string" &&
+    front.listHeading.trim().length > 0
+  ) {
     return front.listHeading.trim();
   }
   if (typeof front.title === "string" && front.title.trim().length > 0) {
@@ -1626,484 +796,15 @@ function resolveListingHeading(front) {
   return "";
 }
 
-function addCollectionEntry(store, key, entry, type) {
-  if (!store[key]) {
-    store[key] = [];
-  }
-  store[key].push({
-    ...entry,
-    type,
-  });
-}
-
-function sortCollectionEntries(collections) {
-  const sorted = {};
-  Object.keys(collections).forEach((lang) => {
-    sorted[lang] = {};
-    Object.keys(collections[lang]).forEach((key) => {
-      sorted[lang][key] = collections[lang][key]
-        .slice()
-        .sort((a, b) => {
-          const aDate = Date.parse(a.date ?? "") || 0;
-          const bDate = Date.parse(b.date ?? "") || 0;
-          if (aDate === bDate) {
-            return (a.title ?? "").localeCompare(b.title ?? "", lang);
-          }
-          return bDate - aDate;
-        });
-    });
-  });
-  return sorted;
-}
-
-async function collectRssEntriesForLang(lang, limit = 50) {
-  if (_core.contents.count === 0) {
-    return [];
-  }
-
-  const entries = [];
-  for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished || !file.isPostTemplate || file.lang !== lang) {
-      continue;
-    }
-
-    const categories = [];
-    if (file.category) {
-      categories.push(file.category);
-    }
-    if (Array.isArray(file.tags)) {
-      categories.push(...file.tags);
-    }
-
-    const uniqueCategories = [...new Set(categories.map((category) =>
-      typeof category === "string" ? category.trim() : "",
-    ).filter(Boolean))];
-
-    entries.push({
-      title: file.title,
-      description: file.description,
-      link: resolveUrl(file.canonical),
-      guid: resolveUrl(file.canonical),
-      date: file.date,
-      category: file.category,
-      categories: uniqueCategories,
-    });
-  }
-
-  entries.sort((a, b) => {
-    const aTime = a.date ? Date.parse(a.date) || 0 : 0;
-    const bTime = b.date ? Date.parse(b.date) || 0 : 0;
-    return bTime - aTime;
-  });
-
-  if (limit && Number.isFinite(limit) && limit > 0) {
-    return entries.slice(0, limit);
-  }
-
-  return entries;
-}
-
-async function collectSitemapEntriesFromContent() {
-  if (_core.contents.count === 0) {
-    return [];
-  }
-
-  const urls = [];
-  for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished) {
-      continue;
-    }
-
-    const absoluteLoc = resolveUrl(file.canonical);
-    const updated = file.updated ?? file.date;
-    const baseLastmod = _fmt.lastMod(updated);
-
-    urls.push({
-      loc: absoluteLoc,
-      lastmod: baseLastmod,
-    });
-
-    if (_cfg.seo.includePaging && (file.template === "collection" || file.template === "home")) {
-      const langCollections = PAGES[file.lang] ?? {};
-      const key = resolveListingKey(file.header);
-      const allItems = key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
-      const pageSizeSetting = _cfg.content.pagination.pageSize;
-      const pageSize = pageSizeSetting > 0 ? pageSizeSetting : 5;
-      const totalPages = Math.max(1, pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1);
-
-      if (totalPages > 1) {
-        const segment = resolvePaginationSegment(file.lang);
-
-        const baseSlug = file.slug.replace(/\/+$/, "");
-
-        let latestTimestamp = null;
-        if (Array.isArray(allItems)) {
-          allItems.forEach((item) => {
-            if (!item || !item.date) return;
-            const ts = Date.parse(item.date);
-            if (!Number.isNaN(ts)) {
-              if (latestTimestamp == null || ts > latestTimestamp) {
-                latestTimestamp = ts;
-              }
-            }
-          });
-        }
-        const listingLastmod =
-          latestTimestamp != null ? _fmt.lastMod(new Date(latestTimestamp)) : baseLastmod;
-
-        for (let pageIndex = 2; pageIndex <= totalPages; pageIndex += 1) {
-          const pageSlug = baseSlug
-            ? `${baseSlug}/${segment}-${pageIndex}`
-            : `${segment}-${pageIndex}`;
-
-          let canonicalOverride;
-          if (typeof data.canonical === "string" && data.canonical.trim().length > 0) {
-            const trimmed = data.canonical.trim().replace(/\/+$/, "");
-            canonicalOverride = `${trimmed}/${segment}-${pageIndex}/`;
-          } else {
-            canonicalOverride = undefined;
-          }
-
-          const pageCanonical = buildContentUrl(canonicalOverride, file.lang, pageSlug);
-          const pageAbsoluteLoc = resolveUrl(pageCanonical);
-          urls.push({
-            loc: pageAbsoluteLoc,
-            lastmod: listingLastmod,
-          });
-        }
-      }
-    }
-  }
-
-  urls.sort((a, b) => (a.loc || "").localeCompare(b.loc || ""));
-
-  return urls;
-}
-
-async function buildRssFeeds() {
-  const email = _cfg.identity.email;
-  const authorName = _cfg.identity.author;
-  const languages = _i18n.supported.length ? _i18n.supported : [_i18n.default];
-  const feedUrls = languages.reduce((acc, lang) => {
-    const langConfig = _i18n.build[lang] ?? _i18n.build[_i18n.default];
-    const baseUrl = (langConfig?.canonical ?? _cfg.identity.url) || "";
-    const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-    acc[lang] = `${normalizedBase}feed.xml`;
-    return acc;
-  }, {});
-
-  for (const lang of languages) {
-    const rssEntries = await collectRssEntriesForLang(lang, 50);
-    if (!rssEntries.length) {
-      return;
-    }
-
-    const siteTitle = _i18n.t(lang, "site.title", _cfg.identity.author);
-    const siteDescription = _i18n.t(lang, "site.description", "");
-    const langConfig = _i18n.build[lang] ?? _i18n.build[_i18n.default];
-    const channelLink = langConfig?.canonical ?? _cfg.identity.url;
-    const selfFeedLink = feedUrls[lang] ?? `${channelLink}feed.xml`;
-    const languageCulture = _i18n.culture(lang) ?? lang;
-    const languageCode = languageCulture.replace("_", "-");
-    const lastBuildDate = _fmt.rssDate(new Date());
-    const alternateFeedLinks = languages
-      .filter((alternateLang) => alternateLang !== lang && feedUrls[alternateLang])
-      .map(
-        (alternateLang) =>
-          `    <atom:link href="${_fmt.escape(feedUrls[alternateLang])}" rel="alternate" hreflang="${_fmt.escape(alternateLang)}" type="application/rss+xml" />`,
-      )
-      .join("\n");
-
-    const itemsXml = rssEntries
-      .map((entry) => {
-        const description = entry.description ? entry.description.trim() : "";
-        const descriptionCdata = description ? `<![CDATA[ ${description} ]]>` : "";
-        const authorField =
-          email && authorName ? `${email} (${authorName})` : email || authorName || "";
-        const categories = [];
-        if (entry.category) {
-          categories.push(entry.category);
-        }
-
-        const categoryLines = [...new Set(categories.map((category) =>
-          typeof category === "string" ? category.trim() : "",
-        ).filter(Boolean))]
-          .map((category) => `    <category>${_fmt.escape(category)}</category>`)
-          .join("\n");
-
-        return [
-          "  <item>",
-          `    <title>${_fmt.escape(entry.title)}</title>`,
-          `    <link>${_fmt.escape(entry.link)}</link>`,
-          `    <guid isPermaLink="true">${_fmt.escape(entry.guid)}</guid>`,
-          entry.date ? `    <pubDate>${_fmt.rssDate(entry.date)}</pubDate>` : "",
-          descriptionCdata ? `    <description>${descriptionCdata}</description>` : "",
-          authorField ? `    <author>${_fmt.escape(authorField)}</author>` : "",
-          categoryLines,
-          "  </item>",
-        ]
-          .filter(Boolean)
-          .join("\n");
-      })
-      .join("\n");
-
-    const rssXml = [
-      '<?xml version="1.0" encoding="UTF-8"?>',
-      '<?xml-stylesheet type="text/xsl" href="/assets/rss.xsl"?>',
-      '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">',
-      "  <channel>",
-      `    <title>${_fmt.escape(siteTitle)}</title>`,
-      `    <link>${_fmt.escape(channelLink)}</link>`,
-      `    <atom:link href="${_fmt.escape(selfFeedLink)}" rel="self" type="application/rss+xml" />`,
-      ...(alternateFeedLinks ? [alternateFeedLinks] : []),
-      `    <description>${_fmt.escape(siteDescription)}</description>`,
-      `    <language>${_fmt.escape(languageCode)}</language>`,
-      `    <lastBuildDate>${lastBuildDate}</lastBuildDate>`,
-      `    <generator>Shevky Static Site Generator</generator>`,
-      `    <managingEditor>${_cfg.identity.email} (${_cfg.identity.author})</managingEditor>`,
-      `    <ttl>1440</ttl>`,
-      itemsXml,
-      "  </channel>",
-      "</rss>",
-      "",
-    ].join("\n");
-
-    const relativePath =
-      lang === _i18n.default ? "feed.xml" : _io.path.combine(lang, "feed.xml");
-    await writeHtmlFile(relativePath, rssXml, {
-      action: "BUILD_FEED",
-      type: "xml",
-      lang,
-      items: rssEntries.length,
-      inputBytes: byteLength(itemsXml),
-    });
-  }
-}
-
-async function buildSitemap() {
-  const contentEntries = await collectSitemapEntriesFromContent();
-  const collectionEntries = SEO_INCLUDE_COLLECTIONS ? collectSitemapEntriesFromDynamicCollections() : [];
-  const combined = [...contentEntries, ...collectionEntries];
-  if (!combined.length) {
-    return;
-  }
-
-  const entryByLoc = new Map();
-  combined.forEach((entry) => {
-    if (!entry || !entry.loc) return;
-    const key = entry.loc;
-    const existing = entryByLoc.get(key);
-    if (!existing) {
-      entryByLoc.set(key, entry);
-      return;
-    }
-    const existingDate = existing.lastmod ? Date.parse(existing.lastmod) : null;
-    const incomingDate = entry.lastmod ? Date.parse(entry.lastmod) : null;
-    if (
-      incomingDate != null
-      && !Number.isNaN(incomingDate)
-      && (existingDate == null || Number.isNaN(existingDate) || incomingDate > existingDate)
-    ) {
-      entryByLoc.set(key, entry);
-    }
-  });
-
-  const entries = Array.from(entryByLoc.values()).sort((a, b) =>
-    (a.loc || "").localeCompare(b.loc || ""),
-  );
-
-  const urlset = entries
-    .map((entry) => {
-      const parts = [
-        "  <url>",
-        `    <loc>${_fmt.escape(entry.loc)}</loc>`,
-      ];
-      if (entry.lastmod) {
-        parts.push(`    <lastmod>${_fmt.escape(entry.lastmod)}</lastmod>`);
-      }
-      parts.push("  </url>");
-      return parts.join("\n");
-    })
-    .join("\n");
-
-  const sitemapXml = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<?xml-stylesheet type="text/xsl" href="/assets/sitemap.xsl"?>',
-    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-    urlset,
-    "</urlset>",
-    "",
-  ].join("\n");
-
-  await writeHtmlFile("sitemap.xml", sitemapXml, {
-    action: "BUILD_SITEMAP",
-    type: "xml",
-    items: entries.length,
-    inputBytes: byteLength(urlset),
-  });
-}
-
-function collectSitemapEntriesFromDynamicCollections() {
-  const urls = [];
-  if (!COLLECTION_CONFIG || typeof COLLECTION_CONFIG !== "object") {
-    return urls;
-  }
-
-  const configKeys = Object.keys(COLLECTION_CONFIG);
-  for (const configKey of configKeys) {
-    const config = COLLECTION_CONFIG[configKey];
-    if (!config || typeof config !== "object") {
-      continue;
-    }
-
-    const slugPattern =
-      config.slugPattern && typeof config.slugPattern === "object" ? config.slugPattern : {};
-
-    const types =
-      Array.isArray(config.types) && config.types.length > 0
-        ? config.types
-          .map((value) =>
-            normalizeCollectionTypeValue(typeof value === "string" ? value : ""),
-          )
-          .filter((value) => value.length > 0)
-        : null;
-
-    if (!types || types.length === 0) {
-      continue;
-    }
-
-    const languages = Object.keys(PAGES);
-    for (const lang of languages) {
-      const langCollections = PAGES[lang] ?? {};
-      const langSlugPattern = typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
-
-      const collectionKeys = Object.keys(langCollections);
-      for (const key of collectionKeys) {
-        const sourceItems = langCollections[key] ?? [];
-        if (!Array.isArray(sourceItems) || sourceItems.length === 0) {
-          continue;
-        }
-        const items = dedupeCollectionItems(sourceItems);
-        if (items.length === 0) {
-          continue;
-        }
-
-        const hasMatchingType = items.some((entry) => types.includes(normalizeCollectionTypeValue(entry.type)));
-        if (!hasMatchingType) {
-          continue;
-        }
-
-        const slug =
-          langSlugPattern && langSlugPattern.includes("{{key}}")
-            ? langSlugPattern.replace("{{key}}", key)
-            : (langSlugPattern ?? key);
-
-        const canonical = buildContentUrl(null, lang, slug);
-        const absoluteLoc = resolveUrl(canonical);
-
-        let latestTimestamp = null;
-        items.forEach((item) => {
-          if (!item || !item.date) return;
-          const ts = Date.parse(item.updated);
-          if (!Number.isNaN(ts)) {
-            if (latestTimestamp == null || ts > latestTimestamp) {
-              latestTimestamp = ts;
-            }
-          }
-        });
-
-        const lastmod = latestTimestamp != null ? _fmt.lastMod(new Date(latestTimestamp)) : new Date().toISOString();
-
-        urls.push({
-          loc: absoluteLoc,
-          lastmod,
-        });
-      }
-    }
-  }
-
-  urls.sort((a, b) => (a.loc || "").localeCompare(b.loc || ""));
-  return urls;
-}
-
-async function buildRobotsTxt() {
-  const base = (_cfg.identity.url).replace(/\/+$/, "");
-  const allowList = _cfg.robots.allow;
-  const disallowList = _cfg.robots.disallow;
-
-  const lines = ["User-agent: *"];
-
-  allowList.forEach((path) => {
-    if (typeof path === "string" && path.trim().length > 0) {
-      lines.push(`Allow: ${path.trim()}`);
-    }
-  });
-
-  disallowList.forEach((path) => {
-    if (typeof path === "string" && path.trim().length > 0) {
-      lines.push(`Disallow: ${path.trim()}`);
-    }
-  });
-
-  lines.push("");
-  lines.push(`Sitemap: ${base}/sitemap.xml`);
-  lines.push("");
-
-  const payload = lines.join("\n");
-  await writeHtmlFile("robots.txt", payload, {
-    action: "BUILD_ROBOTS",
-    type: "text",
-    inputBytes: byteLength(payload),
-  });
-}
-
-async function buildMenuItemsFromContent() {
-  if (_core.contents.count === 0) {
-    return {};
-  }
-
-  const itemsByLang = {};
-  for (const file of _core.contents.files) {
-    if (!file.isValid || file.isDraft || !file.isPublished || file.isHiddenOnMenu) {
-      continue;
-    }
-
-    const url = buildContentUrl(file.canonical, file.lang, file.slug);
-
-    if (!Array.isArray(itemsByLang[file.lang])) {
-      itemsByLang[file.lang] = [];
-    }
-
-    itemsByLang[file.lang].push({
-      key: file.id,
-      label: file.menuLabel,
-      url,
-      order: file.menuOrder,
-    });
-  }
-
-  Object.keys(itemsByLang).forEach((lang) => {
-    itemsByLang[lang]
-      .sort((a, b) => {
-        if (a.order === b.order) {
-          return a.label.localeCompare(b.label, lang);
-        }
-        return a.order - b.order;
-      })
-      .forEach((item) => {
-        delete item.order;
-      });
-  });
-
-  return itemsByLang;
-}
-
 async function buildContentPages() {
-  if (!_core.contents.count === 0) {
+  if (contentRegistry.count === 0) {
     return;
   }
 
-  for (const file of _core.contents.files) {
+  const contentFiles = /** @type {ContentFile[]} */ (
+    /** @type {unknown} */ (contentRegistry.files)
+  );
+  for (const file of contentFiles) {
     _log.step("PROCESS_CONTENT", {
       file: normalizeLogPath(file.sourcePath),
       lang: file.lang,
@@ -2112,8 +813,14 @@ async function buildContentPages() {
     });
 
     const dictionary = _i18n.get(file.lang);
-    const componentContext = buildContentComponentContext(file.header, file.lang, dictionary);
-    const { markdown: markdownSource, placeholders } = renderMarkdownComponents(file.content, componentContext);
+    const componentContext = renderEngine.buildContentComponentContext(
+      file.header,
+      file.lang,
+      dictionary,
+      { i18n: _i18n, pages: PAGES },
+    );
+    const { markdown: markdownSource, placeholders } =
+      renderEngine.renderMarkdownComponents(file.content, componentContext);
     if (placeholders.length > 0) {
       _log.step("COMPONENT_SLOTS", {
         file: normalizeLogPath(file.sourcePath),
@@ -2121,11 +828,14 @@ async function buildContentPages() {
       });
     }
 
-    const markdownHtml = marked.parse(markdownSource ?? "");
-    const hydratedHtml = injectMarkdownComponents(markdownHtml ?? "", placeholders);
+    const markdownHtml = renderEngine.parseMarkdown(markdownSource ?? "");
+    const hydratedHtml = renderEngine.injectMarkdownComponents(
+      markdownHtml ?? "",
+      placeholders,
+    );
 
     if (file.template === "collection" || file.template === "home") {
-      await buildPaginatedCollectionPages({
+      await renderEngine.buildPaginatedCollectionPages({
         frontMatter: file.header,
         lang: file.lang,
         baseSlug: file.slug,
@@ -2134,21 +844,64 @@ async function buildContentPages() {
         contentHtml: hydratedHtml,
         dictionary,
         sourcePath: file.sourcePath,
+        pages: PAGES,
+        renderContentTemplate,
+        buildViewPayload: (input) =>
+          renderEngine.buildViewPayload(input, {
+            pages: PAGES,
+            i18n: _i18n,
+            metaEngine,
+            menuEngine,
+            getFooterData,
+            analyticsSnippets: _analytics.snippets,
+            buildEasterEggPayload,
+          }),
+        renderPage,
+        metaEngine,
+        menuEngine,
+        resolveListingKey,
+        resolveListingEmpty,
+        resolveCollectionType,
+        buildCollectionTypeFlags,
+        resolvePaginationSegment,
+        dedupeCollectionItems,
+        byteLength,
       });
 
       continue;
     }
 
-    const contentHtml = await renderContentTemplate(file.template, hydratedHtml, file.header, file.lang, dictionary);
-    const pageMeta = buildPageMeta(file.header, file.lang, file.slug);
-    const activeMenuKey = resolveActiveMenuKey(file.header);
-    const view = buildViewPayload({
-      lang: file.lang,
-      activeMenuKey,
-      pageMeta,
-      content: contentHtml,
+    const contentHtml = await renderContentTemplate(
+      file.template,
+      hydratedHtml,
+      file.header,
+      file.lang,
       dictionary,
-    });
+    );
+    const pageMeta = metaEngine.buildPageMeta(
+      file.header,
+      file.lang,
+      file.slug,
+    );
+    const activeMenuKey = menuEngine.resolveActiveMenuKey(file.header);
+    const view = renderEngine.buildViewPayload(
+      {
+        lang: file.lang,
+        activeMenuKey,
+        pageMeta,
+        content: contentHtml,
+        dictionary,
+      },
+      {
+        pages: PAGES,
+        i18n: _i18n,
+        metaEngine,
+        menuEngine,
+        getFooterData,
+        analyticsSnippets: _analytics.snippets,
+        buildEasterEggPayload,
+      },
+    );
 
     await renderPage({
       layoutName: file.layout,
@@ -2167,151 +920,59 @@ async function buildContentPages() {
     });
   }
 
-  await buildDynamicCollectionPages();
+  await renderEngine.buildDynamicCollectionPages({
+    collectionsConfig: COLLECTION_CONFIG,
+    pages: PAGES,
+    i18n: _i18n,
+    renderContentTemplate,
+    buildViewPayload: (input) =>
+      renderEngine.buildViewPayload(input, {
+        pages: PAGES,
+        i18n: _i18n,
+        metaEngine,
+        menuEngine,
+        getFooterData,
+        analyticsSnippets: _analytics.snippets,
+        buildEasterEggPayload,
+      }),
+    renderPage,
+    metaEngine,
+    menuEngine,
+    resolveCollectionType,
+    normalizeCollectionTypeValue,
+    resolveCollectionDisplayKey,
+    dedupeCollectionItems,
+    normalizeLogPath,
+    io: _io,
+    byteLength,
+  });
 }
 
-async function buildPaginatedCollectionPages(options) {
-  const {
-    frontMatter,
-    lang,
-    baseSlug,
-    layoutName,
-    templateName,
-    contentHtml,
-    dictionary,
-    sourcePath,
-  } = options;
-
-  const langCollections = PAGES[lang] ?? {};
-  const key = resolveListingKey(frontMatter);
-  const sourceItems = key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
-  const allItems = dedupeCollectionItems(sourceItems);
-  const pageSizeSetting = _cfg.content.pagination.pageSize;
-  const pageSize = pageSizeSetting > 0 ? pageSizeSetting : 5;
-  const totalPages = Math.max(1, pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1);
-  const emptyMessage = resolveListingEmpty(frontMatter, lang);
-  const collectionType = resolveCollectionType(frontMatter, allItems);
-  const collectionFlags = buildCollectionTypeFlags(collectionType);
-
-  for (let pageIndex = 1; pageIndex <= totalPages; pageIndex += 1) {
-    const startIndex = (pageIndex - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const items = allItems.slice(startIndex, endIndex);
-    const hasItems = items.length > 0;
-    const hasPrev = pageIndex > 1;
-    const hasNext = pageIndex < totalPages;
-
-    const segment = resolvePaginationSegment(lang);
-
-    const base = baseSlug.replace(/\/+$/, "");
-
-    const pageSlug =
-      pageIndex === 1
-        ? baseSlug
-        : base
-          ? `${base}/${segment}-${pageIndex}`
-          : `${segment}-${pageIndex}`;
-
-    const prevSlug =
-      pageIndex > 2
-        ? base
-          ? `${base}/${segment}-${pageIndex - 1}`
-          : `${segment}-${pageIndex - 1}`
-        : baseSlug;
-
-    const nextSlug = base ? `${base}/${segment}-${pageIndex + 1}` : `${segment}-${pageIndex + 1}`;
-
-    const listing = {
-      key,
-      lang,
-      items,
-      hasItems,
-      emptyMessage,
-      page: pageIndex,
-      totalPages,
-      hasPrev,
-      hasNext,
-      hasPagination: totalPages > 1,
-      prevUrl: hasPrev ? buildContentUrl(null, lang, prevSlug) : "",
-      nextUrl: hasNext ? buildContentUrl(null, lang, nextSlug) : "",
-      type: collectionType,
-      ...collectionFlags,
-    };
-
-    let canonical = frontMatter.canonical;
-    if (pageIndex > 1) {
-      if (typeof frontMatter.canonical === "string" && frontMatter.canonical.trim().length > 0) {
-        const trimmed = frontMatter.canonical.trim().replace(/\/+$/, "");
-        canonical = `${trimmed}/${segment}-${pageIndex}/`;
-      } else {
-        canonical = undefined;
-      }
-    }
-
-    const frontForPage = {
-      ...frontMatter,
-      slug: pageSlug,
-      canonical,
-    };
-
-    if (collectionType) {
-      frontForPage.collectionType = collectionType;
-    }
-
-    const renderedContent = await renderContentTemplate(
-      templateName,
-      contentHtml,
-      frontForPage,
-      lang,
-      dictionary,
-      listing,
-    );
-
-    const pageMeta = buildPageMeta(frontForPage, lang, pageSlug);
-    const activeMenuKey = resolveActiveMenuKey(frontForPage);
-    const view = buildViewPayload({
-      lang,
-      activeMenuKey,
-      pageMeta,
-      content: renderedContent,
-      dictionary,
-    });
-
-    await renderPage({
-      layoutName,
-      view,
-      front: frontForPage,
-      lang,
-      slug: pageSlug,
-      writeMeta: {
-        action: "BUILD_COLLECTION",
-        type: templateName,
-        source: sourcePath,
-        lang,
-        template: layoutName,
-        items: items.length,
-        page: `${pageIndex}/${totalPages}`,
-        inputBytes: byteLength(renderedContent),
-      },
-    });
-  }
-}
-
+/** @param {string} configKey @param {string} defaultKey @param {CollectionEntry[]} items */
 function resolveCollectionDisplayKey(configKey, defaultKey, items) {
   if (configKey === "series" && Array.isArray(items)) {
-    const entryWithTitle = items.find((entry) =>
-      entry && typeof entry.seriesTitle === "string" && entry.seriesTitle.trim().length > 0,
+    const entryWithTitle = items.find(
+      (entry) =>
+        entry &&
+        typeof entry.seriesTitle === "string" &&
+        entry.seriesTitle.trim().length > 0,
     );
-    if (entryWithTitle) {
-      return entryWithTitle.seriesTitle.trim();
+    const seriesTitle =
+      typeof entryWithTitle?.seriesTitle === "string"
+        ? entryWithTitle.seriesTitle.trim()
+        : "";
+    if (seriesTitle) {
+      return seriesTitle;
     }
   }
   return defaultKey;
 }
 
+/** @param {CollectionEntry[]} items */
 function dedupeCollectionItems(items) {
   if (!Array.isArray(items) || items.length === 0) return items;
   const seen = new Map();
+  /** @type {CollectionEntry[]} */
   const order = [];
   items.forEach((item) => {
     const id = item?.id;
@@ -2335,166 +996,7 @@ function dedupeCollectionItems(items) {
   return order;
 }
 
-async function buildDynamicCollectionPages() {
-  if (!COLLECTION_CONFIG || typeof COLLECTION_CONFIG !== "object") {
-    return;
-  }
-
-  const configKeys = Object.keys(COLLECTION_CONFIG);
-  for (const configKey of configKeys) {
-    const config = COLLECTION_CONFIG[configKey];
-    if (!config || typeof config !== "object") {
-      continue;
-    }
-
-    const templateName =
-      typeof config.template === "string" && config.template.trim().length > 0
-        ? config.template.trim()
-        : "category";
-
-    const slugPattern =
-      config.slugPattern && typeof config.slugPattern === "object" ? config.slugPattern : {};
-    const pairs =
-      config.pairs && typeof config.pairs === "object" ? config.pairs : null;
-
-    const types =
-      Array.isArray(config.types) && config.types.length > 0
-        ? config.types
-          .map((value) => (typeof value === "string" ? value.trim() : ""))
-          .filter((value) => value.length > 0)
-        : null;
-
-    if (!types || types.length === 0) {
-      continue;
-    }
-
-    const languages = Object.keys(PAGES);
-    for (const lang of languages) {
-      const langCollections = PAGES[lang] ?? {};
-      const dictionary = _i18n.get(lang);
-      const langSlugPattern = typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
-      const titleSuffix = _i18n.t(lang, `seo.collections.${configKey}.titleSuffix`, "");
-
-      const collectionKeys = Object.keys(langCollections);
-      for (const key of collectionKeys) {
-        const items = langCollections[key] ?? [];
-        if (!Array.isArray(items) || items.length === 0) {
-          continue;
-        }
-
-        const typedItems = items.filter((entry) => entry && types.includes(entry.type));
-        if (!typedItems.length) {
-          continue;
-        }
-
-        const dedupedItems = dedupeCollectionItems(typedItems);
-        if (!dedupedItems.length) {
-          continue;
-        }
-
-        const slug =
-          langSlugPattern && langSlugPattern.includes("{{key}}")
-            ? langSlugPattern.replace("{{key}}", key)
-            : (langSlugPattern ?? key);
-
-        let alternate;
-        if (pairs) {
-          const pairEntry = pairs[key];
-          if (pairEntry && typeof pairEntry === "object") {
-            const altMap = {};
-            _i18n.supported.forEach((altLang) => {
-              if (altLang === lang) {
-                return;
-              }
-
-              const altKey =
-                typeof pairEntry[altLang] === "string" ? pairEntry[altLang].trim() : "";
-              if (!altKey) {
-                return;
-              }
-
-              const altSlugPattern =
-                typeof slugPattern[altLang] === "string" ? slugPattern[altLang] : null;
-              const altSlug =
-                altSlugPattern && altSlugPattern.includes("{{key}}")
-                  ? altSlugPattern.replace("{{key}}", altKey)
-                  : (altSlugPattern ?? altKey);
-              altMap[altLang] = buildContentUrl(null, altLang, altSlug);
-            });
-
-            if (Object.keys(altMap).length > 0) {
-              alternate = altMap;
-            }
-          }
-        }
-
-        const displayKey = resolveCollectionDisplayKey(configKey, key, dedupedItems);
-        const baseTitle = displayKey;
-        const normalizedTitleSuffix =
-          typeof titleSuffix === "string" && titleSuffix.trim().length > 0
-            ? titleSuffix.trim()
-            : "";
-        const effectiveTitle = normalizedTitleSuffix
-          ? `${baseTitle} | ${normalizedTitleSuffix}`
-          : baseTitle;
-        const frontTitle =
-          configKey === "series"
-            ? displayKey
-            : effectiveTitle;
-        const front = {
-          title: frontTitle,
-          metaTitle: effectiveTitle,
-          slug,
-          template: templateName,
-          listKey: key,
-          ...(alternate ? { alternate } : {}),
-        };
-
-        front.listHeading = effectiveTitle;
-        if (configKey === "series") {
-          front.series = key;
-          front.seriesTitle = displayKey;
-        }
-
-        const fallbackType = normalizeCollectionTypeValue(types.length === 1 ? types[0] : "");
-        const resolvedCollectionType = resolveCollectionType(front, dedupedItems, fallbackType);
-        if (resolvedCollectionType) {
-          front.collectionType = resolvedCollectionType;
-        }
-
-        const contentHtml = await renderContentTemplate(templateName, "", front, lang, dictionary);
-        const pageMeta = buildPageMeta(front, lang, slug);
-        const layoutName = "default";
-        const activeMenuKey = resolveActiveMenuKey(front);
-        const view = buildViewPayload({
-          lang,
-          activeMenuKey,
-          pageMeta,
-          content: contentHtml,
-          dictionary,
-        });
-
-        await renderPage({
-          layoutName,
-          view,
-          front,
-          lang,
-          slug,
-          writeMeta: {
-            action: "BUILD_DYNAMIC_COLLECTION",
-            type: templateName,
-            source: normalizeLogPath(_io.path.combine("collections", configKey)),
-            lang,
-            template: layoutName,
-            items: dedupedItems.length,
-            inputBytes: byteLength(contentHtml),
-          },
-        });
-      }
-    }
-  }
-}
-
+/** @param {string} lang @param {string} slug */
 function registerLegacyPaths(lang, slug) {
   const cleaned = (slug ?? "").replace(/^\/+/, "");
   if (!cleaned) return;
@@ -2505,6 +1007,7 @@ function registerLegacyPaths(lang, slug) {
   }
 }
 
+/** @param {string} currentDir @param {string} relative */
 async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
   if (!(await _io.directory.exists(currentDir))) {
     return;
@@ -2524,10 +1027,14 @@ async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
     }
 
     const raw = await _io.file.read(fullPath);
-    const transformed = await transformHtml(raw);
+    const transformed = await renderEngine.transformHtml(raw, {
+      versionToken,
+      minifyHtml,
+    });
     if (relPath === "index.html") {
       _i18n.supported.forEach(async (langCode) => {
         const localized = applyLanguageMetadata(transformed, langCode);
+        /** @type {string[]} */
         const segments = [];
 
         if (langCode !== _i18n.default) {
@@ -2559,59 +1066,43 @@ async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
 
 async function copyStaticAssets() {
   if (!(await _io.directory.exists(ASSETS_DIR))) {
-    _log.step("ASSETS_SKIP", { reason: "missing", dir: normalizeLogPath(ASSETS_DIR) });
     return;
   }
 
   const targetDir = _io.path.combine(DIST_DIR, "assets");
-
   await _io.directory.copy(ASSETS_DIR, targetDir);
-  _log.step("ASSETS_COPIED", {
-    source: normalizeLogPath(ASSETS_DIR),
-    target: normalizeLogPath(targetDir),
-  });
-
-  if (!_cfg.build.debug) {
-    return;
-  }
-
-  try {
-    const entries = await _io.directory.read(ASSETS_DIR);
-    for (const entry of entries) {
-      const srcPath = _io.path.combine(ASSETS_DIR, entry);
-      const stats = await _io.file.stat(srcPath);
-      if (!stats || (typeof stats.isFile === "function" && !stats.isFile())) {
-        continue;
-      }
-      const destPath = _io.path.combine(targetDir, entry);
-      _log.step("COPY_ASSET", {
-        source: normalizeLogPath(srcPath),
-        target: normalizeLogPath(destPath),
-        output: formatBytes(stats?.size ?? 0),
-      });
-    }
-  } catch (error) {
-    _log.debug("ASSET_SCAN_FAILED", { message: error?.message ?? error });
-  }
+  _log.debug("Assets have been copied.");
 }
 
 async function main() {
-  _log.step("BUILD_START", { dist: normalizeLogPath(DIST_DIR) });
+  // <--- dist:clean
   await ensureDist();
-  await buildCss();
-  await buildJs();
+  await pluginEngine.execute(_plugin.hooks.DIST_CLEAN);
+  // dist:clean --->
+
+  // <--- assets:copy
   await copyStaticAssets();
+  await pluginEngine.execute(_plugin.hooks.ASSETS_COPY);
+  // assets:copy --->
+
+  // <--- content:load
+  await contentRegistry.load(CONTENT_DIR);
+  await pluginEngine.execute(_plugin.hooks.CONTENT_LOAD);
+  // content:load --->
+
+  await menuEngine.build();
+  PAGES = contentRegistry.buildCategoryTagCollections();
+  FOOTER_POLICIES = contentRegistry.buildFooterPolicies();
+  CONTENT_INDEX = contentRegistry.buildContentIndex();
+  await pluginEngine.execute(_plugin.hooks.CONTENT_READY);
 
   await buildContentPages();
   await copyHtmlRecursive();
-  await buildRssFeeds();
-  await buildSitemap();
-  await buildRobotsTxt();
-  _log.step("BUILD_DONE", { dist: normalizeLogPath(DIST_DIR) });
+  await flushPages();
 }
 
 const API = {
-  execute: main
+  execute: main,
 };
 
 export default API;

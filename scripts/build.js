@@ -15,37 +15,32 @@ import {
 
 import _prj from "../lib/project.js";
 import _analytics from "./analytics.js";
-import _view from "./view.js";
 import _social from "./social.js";
 
-import { MetaEngine } from "./meta.js";
-import {
-  setupMarkdown,
-  renderLayoutHtml,
-  renderMarkdownComponents,
-  parseMarkdown,
-  injectMarkdownComponents,
-} from "./engine.js";
+import { MetaEngine } from "../engines/metaEngine.js";
+import { RenderEngine } from "../engines/renderEngine.js";
 
-import { ContentSummary } from "../lib/contentSummary.js";
 
-import { MenuEngine } from "../engines/menuEngine.js";
-import { ContentRegistry } from "../registries/contentRegistry.js";
 import { PluginRegistry } from "../registries/pluginRegistry.js";
+import {
+  TemplateRegistry,
+  TYPE_COMPONENT,
+  TYPE_LAYOUT,
+  TYPE_PARTIAL,
+  TYPE_TEMPLATE,
+} from "../registries/templateRegistry.js";
+import { ContentRegistry } from "../registries/contentRegistry.js";
+import { PageRegistry } from "../registries/pageRegistry.js";
+
 import { PluginEngine } from "../engines/pluginEngine.js";
+import { MenuEngine } from "../engines/menuEngine.js";
 
 /** @typedef {import("../lib/contentFile.js").ContentFile} ContentFile */
 /** @typedef {Record<string, any>} FrontMatter */
-/** @typedef {ReturnType<import("../lib/contentSummary.js").ContentSummary["toObject"]>} ContentSummaryLike */
-/** @typedef {ContentSummaryLike & { type?: string, seriesTitle?: string }} CollectionEntry */
+/** @typedef {import("../types/index.d.ts").ContentSummaryLike} ContentSummaryLike */
+/** @typedef {import("../types/index.d.ts").CollectionEntry} CollectionEntry */
+/** @typedef {import("../types/index.d.ts").CollectionsByLang} CollectionsByLang */
 /** @typedef {{ key: string, label: string, url: string, lang: string }} FooterPolicy */
-
-const contentRegistry = new ContentRegistry();
-const pluginRegistry = new PluginRegistry();
-const pluginEngine = new PluginEngine(pluginRegistry, contentRegistry);
-const menu = new MenuEngine(contentRegistry, buildContentUrl);
-
-const meta = new MetaEngine();
 
 const ROOT_DIR = _prj.rootDir;
 const SRC_DIR = _prj.srcDir;
@@ -58,46 +53,34 @@ const ASSETS_DIR = _prj.assetsDir;
 const SITE_CONFIG_PATH = _prj.siteConfig;
 const I18N_CONFIG_PATH = _prj.i18nConfig;
 
+const pluginRegistry = new PluginRegistry();
+const templateRegistry = new TemplateRegistry();
+const pageRegistry = new PageRegistry();
+
+const metaEngine = new MetaEngine();
+const buildContentUrl = metaEngine.buildContentUrl.bind(metaEngine);
+const contentRegistry = new ContentRegistry(metaEngine);
+const pluginEngine = new PluginEngine(
+  pluginRegistry,
+  contentRegistry,
+  metaEngine,
+);
+const menuEngine = new MenuEngine(contentRegistry, metaEngine);
+const renderEngine = new RenderEngine({
+  templateRegistry,
+  metaEngine,
+  pageRegistry,
+  config: _cfg,
+  format: _fmt,
+});
+
 await _i18n.load(I18N_CONFIG_PATH);
 await _cfg.load(SITE_CONFIG_PATH);
-_log.step("CONFIG_READY", {
-  file: normalizeLogPath(SITE_CONFIG_PATH),
-  debug: _cfg.build.debug ? "on" : "off",
-});
-_log.step("I18N_READY", {
-  file: normalizeLogPath(I18N_CONFIG_PATH),
-  locales: _i18n.supported.length,
-});
-await _view.partials.load(LAYOUTS_DIR);
-const partialKeys = Object.keys(_view.partials.files);
-_log.step("PARTIALS_READY", {
-  dir: normalizeLogPath(LAYOUTS_DIR),
-  total: partialKeys.length,
-  sample: previewList(partialKeys, 8),
-});
-await _view.components.load(COMPONENTS_DIR);
-const componentKeys = Object.keys(_view.components.files);
-_log.step("COMPONENTS_READY", {
-  dir: normalizeLogPath(COMPONENTS_DIR),
-  files: componentKeys.length,
-  sample: previewList(componentKeys, 8),
-});
-await _view.layouts.load(LAYOUTS_DIR);
-const layoutNames =
-  typeof _view.layouts.list === "function" ? _view.layouts.list() : [];
-_log.step("LAYOUTS_READY", {
-  dir: normalizeLogPath(LAYOUTS_DIR),
-  total: layoutNames.length,
-  sample: previewList(layoutNames, 8),
-});
-await _view.templates.load(TEMPLATES_DIR);
-const templateKeys =
-  typeof _view.templates.list === "function" ? _view.templates.list() : [];
-_log.step("TEMPLATES_READY", {
-  dir: normalizeLogPath(TEMPLATES_DIR),
-  total: templateKeys.length,
-  sample: previewList(templateKeys, 8),
-});
+
+await templateRegistry.loadPartials(LAYOUTS_DIR);
+await templateRegistry.loadComponents(COMPONENTS_DIR);
+await templateRegistry.loadLayouts(LAYOUTS_DIR);
+await templateRegistry.loadTemplates(TEMPLATES_DIR);
 
 await pluginRegistry.load(_cfg.plugins);
 
@@ -111,13 +94,13 @@ const COLLECTION_CONFIG = _cfg.content.collections;
 
 const GENERATED_PAGES = new Set();
 
-/** @type {Record<string, Record<string, CollectionEntry[]>>} */
+/** @type {CollectionsByLang} */
 let PAGES = {};
 /** @type {Record<string, FooterPolicy[]>} */
 let FOOTER_POLICIES = {};
 /** @type {Record<string, Record<string, { id: string, lang: string, title: string, canonical: string }>>} */
 let CONTENT_INDEX = {};
-setupMarkdown();
+renderEngine.setupMarkdown();
 
 /** @param {unknown} input */
 function byteLength(input) {
@@ -165,84 +148,9 @@ function normalizeLogPath(pathValue) {
   return normalized;
 }
 
-/** @param {unknown} values @param {number} [limit] */
-function previewList(values, limit = 5) {
-  if (!Array.isArray(values) || values.length === 0) {
-    return undefined;
-  }
-
-  const normalized = values
-    .map((value) => (value == null ? "" : String(value).trim()))
-    .filter((value) => value.length > 0);
-  if (!normalized.length) {
-    return undefined;
-  }
-
-  const slice = normalized.slice(0, limit);
-  const extra = normalized.length - slice.length;
-  if (extra > 0) {
-    return `${slice.join(", ")} +${extra}`;
-  }
-
-  return slice.join(", ");
-}
-
-/** @param {{ id?: unknown, slug?: unknown, title?: unknown, sourcePath?: unknown }} file */
-function describeContentEntry(file) {
-  if (!file || typeof file !== "object") {
-    return "";
-  }
-
-  return (
-    (typeof file.id === "string" && file.id.trim()) ||
-    (typeof file.slug === "string" && file.slug.trim()) ||
-    (typeof file.title === "string" && file.title.trim()) ||
-    normalizeLogPath(
-      typeof file.sourcePath === "string" ? file.sourcePath : "",
-    ) ||
-    ""
-  );
-}
-
 async function ensureDist() {
   await _io.directory.remove(DIST_DIR);
-  _log.step("DIST_CLEAN", { target: normalizeLogPath(DIST_DIR) });
   await _io.directory.create(DIST_DIR);
-  _log.step("DIST_READY", { target: normalizeLogPath(DIST_DIR) });
-}
-
-/** @param {string} html */
-async function transformHtml(html) {
-  let output = html
-    .replace(/\/output\.css(\?v=[^"']+)?/g, `/output.css?v=${versionToken}`)
-    .replace(/\/output\.js(\?v=[^"']+)?/g, `/output.js?v=${versionToken}`)
-    .replace(/\b(src|href)="~\//g, '$1="/');
-
-  if (!_cfg.build.minify) {
-    return output;
-  }
-
-  try {
-    output = await minifyHtml(output, {
-      collapseWhitespace: true,
-      collapseBooleanAttributes: true,
-      decodeEntities: true,
-      removeComments: true,
-      removeRedundantAttributes: true,
-      removeScriptTypeAttributes: true,
-      removeStyleLinkTypeAttributes: true,
-      removeEmptyAttributes: false,
-      sortAttributes: true,
-      sortClassName: true,
-      minifyCSS: true,
-      minifyJS: true,
-    });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.warn("[build] Failed to minify HTML:", msg);
-  }
-
-  return output;
 }
 
 /** @param {string} html @param {string[]} locales */
@@ -305,7 +213,7 @@ function buildEasterEggPayload(view) {
   }
 
   try {
-    return meta.serializeForInlineScript(view);
+    return metaEngine.serializeForInlineScript(view);
   } catch {
     return "{}";
   }
@@ -335,6 +243,18 @@ async function writeHtmlFile(relativePath, html, meta = {}) {
   });
 }
 
+async function flushPages() {
+  const pages = pageRegistry
+    .list()
+    .sort((a, b) => (a.outputPath || "").localeCompare(b.outputPath || ""));
+  for (const page of pages) {
+    if (!page.outputPath) {
+      continue;
+    }
+    await writeHtmlFile(page.outputPath, page.html, page.writeMeta ?? {});
+  }
+}
+
 /** @param {string} html @param {string} langKey */
 function applyLanguageMetadata(html, langKey) {
   const config = _i18n.build[langKey];
@@ -342,7 +262,7 @@ function applyLanguageMetadata(html, langKey) {
     return html;
   }
 
-  const altLocales = meta.normalizeAlternateLocales(config.altLocale);
+  const altLocales = metaEngine.normalizeAlternateLocales(config.altLocale);
 
   let output = html
     .replace(/(<html\b[^>]*\slang=")(.*?)"/, `$1${config.langAttr}"`)
@@ -425,8 +345,6 @@ function buildTagUrlFromLabel(label, lang) {
 
 /** @param {string} lang */
 function buildFooterTags(lang) {
-  /** @type {Record<string, CollectionEntry[]>} */
-  /** @type {Record<string, CollectionEntry[]>} */
   const langCollections = PAGES[lang] ?? {};
   const limit = _cfg.seo.footerTagCount;
   /** @type {Array<{ key: string, count: number, url: string }>} */
@@ -534,7 +452,7 @@ async function renderContentTemplate(
   dictionary,
   listingOverride,
 ) {
-  const template = _view.templates.get(templateName);
+  const template = templateRegistry.getTemplate(TYPE_TEMPLATE, templateName);
   /** @type {string[]} */
   const normalizedTags = Array.isArray(front.tags)
     ? front.tags.filter(
@@ -583,10 +501,11 @@ async function renderContentTemplate(
   const collectionFlags = buildCollectionTypeFlags(
     listing?.type ?? resolveCollectionType(normalizedFront, listing?.items),
   );
-  const site = meta.buildSiteData(lang);
+  const site = metaEngine.buildSiteData(lang);
   const languageFlags = _i18n.flags(lang);
+
   return Mustache.render(
-    template,
+    template.content,
     {
       content: { html: decorateHtml(contentHtml, templateName) },
       front: normalizedFront,
@@ -600,8 +519,8 @@ async function renderContentTemplate(
       ...collectionFlags,
     },
     {
-      ..._view.partials.files,
-      ..._view.components.files,
+      ...templateRegistry.getFiles(TYPE_PARTIAL),
+      ...templateRegistry.getFiles(TYPE_COMPONENT),
     },
   );
 }
@@ -611,67 +530,39 @@ async function renderContentTemplate(
  * @param {string} lang
  * @param {Record<string, any>} dictionary
  */
-function buildContentComponentContext(frontMatter, lang, dictionary) {
-  const normalizedLang = lang ?? _i18n.default;
-  const languageFlags = _i18n.flags(normalizedLang);
-  return {
-    front: frontMatter ?? {},
-    lang: normalizedLang,
-    i18n: dictionary ?? {},
-    pages: PAGES[normalizedLang] ?? {},
-    allPages: PAGES,
-    locale: languageFlags.locale,
-    isEnglish: languageFlags.isEnglish,
-    isTurkish: languageFlags.isTurkish,
-  };
-}
-
-/**
- * @param {{ lang: string, activeMenuKey: string | null, pageMeta: any, content: string, dictionary: Record<string, any> }} input
- */
-function buildViewPayload({
-  lang,
-  activeMenuKey,
-  pageMeta,
-  content,
-  dictionary,
-}) {
-  const languageFlags = _i18n.flags(lang);
-  const view = {
-    lang,
-    locale: languageFlags.locale,
-    isEnglish: languageFlags.isEnglish,
-    isTurkish: languageFlags.isTurkish,
-    theme: "light",
-    site: meta.buildSiteData(lang),
-    menu: menu.getMenuData(lang, activeMenuKey),
-    footer: getFooterData(lang),
-    pages: PAGES,
-    i18n: dictionary,
-    i18nInline: _i18n.serialize(),
-    page: pageMeta,
-    content,
-    scripts: {
-      analytics: _analytics.snippets,
-      body: [],
-    },
-    easterEgg: "",
-  };
-  view.easterEgg = buildEasterEggPayload(view);
-  return view;
-}
-
 /**
  * @param {{ layoutName: string, view: Record<string, any>, front: FrontMatter, lang: string, slug: string, writeMeta?: { action?: string, source?: string, type?: string, lang?: string, template?: string, items?: number, page?: string | number, inputBytes?: number } }} input
  */
 async function renderPage({ layoutName, view, front, lang, slug, writeMeta }) {
-  const rendered = renderLayoutHtml({ layoutName, view });
-  const finalHtml = await transformHtml(rendered);
+  const rendered = renderEngine.renderLayout(layoutName, view);
+  const finalHtml = await renderEngine.transformHtml(rendered, {
+    versionToken,
+    minifyHtml,
+  });
   const relativePath = buildOutputPath(front, lang, slug);
-  await writeHtmlFile(relativePath, finalHtml, writeMeta);
+  const page = renderEngine.createPage({
+    kind: "page",
+    type:
+      typeof writeMeta?.type === "string" && writeMeta.type.length > 0
+        ? writeMeta.type
+        : typeof front?.template === "string"
+          ? front.template
+          : "",
+    lang,
+    slug,
+    canonical: buildContentUrl(front?.canonical, lang, slug),
+    layout: layoutName,
+    template: typeof front?.template === "string" ? front.template : "",
+    front,
+    view,
+    html: finalHtml,
+    sourcePath: typeof writeMeta?.source === "string" ? writeMeta.source : "",
+    outputPath: relativePath,
+    writeMeta,
+  });
   GENERATED_PAGES.add(toPosixPath(relativePath));
   registerLegacyPaths(lang, slug);
-  return relativePath;
+  return page;
 }
 
 /** @param {string} html @param {string} templateName */
@@ -681,7 +572,7 @@ function decorateHtml(html, templateName) {
 
 /** @param {FrontMatter} front @param {string} lang @param {string} slug */
 function buildOutputPath(front, lang, slug) {
-  const canonicalRelative = meta.canonicalToRelativePath(front.canonical);
+  const canonicalRelative = metaEngine.canonicalToRelativePath(front.canonical);
   if (canonicalRelative) {
     return _io.path.combine(canonicalRelative, "index.html");
   }
@@ -702,155 +593,9 @@ function toPosixPath(value) {
   return value.split(_io.path.separator).join("/");
 }
 
-/** @param {string | null | undefined} canonical @param {string} lang @param {string} slug */
-function buildContentUrl(canonical, lang, slug) {
-  const normalizedLang = lang ?? _i18n.default;
-  if (typeof canonical === "string" && canonical.trim().length > 0) {
-    const trimmedCanonical = canonical.trim();
-    const relative = meta.canonicalToRelativePath(trimmedCanonical);
-    if (relative) {
-      const normalizedRelative = `/${relative}`.replace(/\/+/g, "/");
-      return meta.ensureDirectoryTrailingSlash(normalizedRelative);
-    }
-
-    return meta.ensureDirectoryTrailingSlash(trimmedCanonical);
-  }
-  const fallback = meta.canonicalToRelativePath(
-    meta.defaultCanonical(normalizedLang, slug),
-  );
-  if (fallback) {
-    const normalizedFallback = `/${fallback}`.replace(/\/+/g, "/");
-    return meta.ensureDirectoryTrailingSlash(normalizedFallback);
-  }
-  const slugSegment = slug ? `/${slug}` : "/";
-  if (normalizedLang !== _i18n.default) {
-    const langPath = `/${normalizedLang}${slugSegment}`.replace(/\/+/g, "/");
-    return meta.ensureDirectoryTrailingSlash(langPath);
-  }
-
-  const normalizedSlug = slugSegment.replace(/\/+/g, "/");
-  return meta.ensureDirectoryTrailingSlash(normalizedSlug);
-}
-
-async function buildFooterPoliciesFromContent() {
-  if (contentRegistry.count === 0) {
-    return {};
-  }
-
-  /** @type {Record<string, FooterPolicy[]>} */
-  const policiesByLang = {};
-  const contentFiles = contentRegistry.files;
-  for (const file of contentFiles) {
-    if (
-      !file.isValid ||
-      file.isDraft ||
-      !file.isPublished ||
-      file.category !== "policy"
-    ) {
-      continue;
-    }
-
-    const policy = {
-      lang: file.lang,
-      key: file.id,
-      label: file.menuLabel,
-      url: buildContentUrl(file.canonical, file.lang, file.slug),
-    };
-
-    if (!Array.isArray(policiesByLang[file.lang])) {
-      policiesByLang[file.lang] = [];
-    }
-
-    policiesByLang[file.lang].push(policy);
-  }
-
-  Object.keys(policiesByLang).forEach((lang) => {
-    policiesByLang[lang].sort((a, b) => a.label.localeCompare(b.label, lang));
-  });
-
-  return policiesByLang;
-}
-
-async function buildContentIndex() {
-  if (contentRegistry.count === 0) {
-    return {};
-  }
-
-  /** @type {Record<string, Record<string, { id: string, lang: string, title: string, canonical: string }>>} */
-  const index = {};
-  const contentFiles = contentRegistry.files;
-  for (const file of contentFiles) {
-    if (!file.isValid || file.isDraft || !file.isPublished || !file.id) {
-      continue;
-    }
-
-    if (!index[file.id]) {
-      index[file.id] = {};
-    }
-
-    index[file.id][file.lang] = {
-      id: file.id,
-      lang: file.lang,
-      title: file.title,
-      canonical: buildContentUrl(file.canonical, file.lang, file.slug),
-    };
-  }
-
-  return index;
-}
-
-async function buildCategoryTagCollections() {
-  if (contentRegistry.count === 0) {
-    return {};
-  }
-
-  /** @type {Record<string, Record<string, CollectionEntry[]>>} */
-  const pagesByLang = {};
-  const contentFiles = contentRegistry.files;
-  for (const file of contentFiles) {
-    if (!file.isValid || file.isDraft || !file.isPublished) {
-      continue;
-    }
-
-    const contentSummary = new ContentSummary(file);
-    const summary = {
-      ...contentSummary.toObject(),
-      canonical: buildContentUrl(file.canonical, file.lang, file.slug),
-    };
-    const langStore = pagesByLang[file.lang] ?? (pagesByLang[file.lang] = {});
-
-    if (file.isPostTemplate && file.isFeatured) {
-      addCollectionEntry(langStore, "home", summary, "home");
-    }
-
-    if (file.category) {
-      addCollectionEntry(langStore, file.category, summary, "category");
-    }
-
-    for (const tag of file.tags) {
-      addCollectionEntry(langStore, tag, summary, "tag");
-    }
-
-    if (file.series) {
-      addCollectionEntry(
-        langStore,
-        file.series,
-        {
-          ...contentSummary.toObject(),
-          seriesTitle: file.seriesTitle,
-        },
-        "series",
-      );
-    }
-  }
-
-  return sortCollectionEntries(pagesByLang);
-}
-
 /** @param {FrontMatter} front @param {string} lang */
 function buildCollectionListing(front, lang) {
   const normalizedLang = lang ?? _i18n.default;
-  /** @type {Record<string, CollectionEntry[]>} */
   const langCollections = PAGES[normalizedLang] ?? {};
   const key = resolveListingKey(front);
   const sourceItems =
@@ -1042,37 +787,6 @@ function resolveListingHeading(front) {
   return "";
 }
 
-/** @param {Record<string, CollectionEntry[]>} store @param {string} key @param {ContentSummaryLike} entry @param {string} type */
-function addCollectionEntry(store, key, entry, type) {
-  if (!store[key]) {
-    store[key] = [];
-  }
-  store[key].push({
-    ...entry,
-    type,
-  });
-}
-
-/** @param {Record<string, Record<string, CollectionEntry[]>>} collections */
-function sortCollectionEntries(collections) {
-  /** @type {Record<string, Record<string, CollectionEntry[]>>} */
-  const sorted = {};
-  Object.keys(collections).forEach((lang) => {
-    sorted[lang] = {};
-    Object.keys(collections[lang]).forEach((key) => {
-      sorted[lang][key] = collections[lang][key].slice().sort((a, b) => {
-        const aDate = Date.parse(String(a.date ?? "")) || 0;
-        const bDate = Date.parse(String(b.date ?? "")) || 0;
-        if (aDate === bDate) {
-          return (a.title ?? "").localeCompare(b.title ?? "", lang);
-        }
-        return bDate - aDate;
-      });
-    });
-  });
-  return sorted;
-}
-
 /** @returns {Promise<Array<{ loc: string, lastmod: string }>>} */
 async function collectSitemapEntriesFromContent() {
   if (contentRegistry.count === 0) {
@@ -1089,7 +803,7 @@ async function collectSitemapEntriesFromContent() {
       continue;
     }
 
-    const absoluteLoc = meta.resolveUrl(file.canonical);
+    const absoluteLoc = metaEngine.resolveUrl(file.canonical);
     const updated = file.updated ?? file.date;
     const baseLastmod = _fmt.lastMod(updated) ?? new Date().toISOString();
 
@@ -1102,7 +816,6 @@ async function collectSitemapEntriesFromContent() {
       _cfg.seo.includePaging &&
       (file.template === "collection" || file.template === "home")
     ) {
-      /** @type {Record<string, CollectionEntry[]>} */
       const langCollections = PAGES[file.lang] ?? {};
       const key = resolveListingKey(file.header);
       const allItems =
@@ -1164,7 +877,7 @@ async function collectSitemapEntriesFromContent() {
             file.lang,
             pageSlug,
           );
-          const pageAbsoluteLoc = meta.resolveUrl(pageCanonical);
+          const pageAbsoluteLoc = metaEngine.resolveUrl(pageCanonical);
           urls.push({
             loc: pageAbsoluteLoc,
             lastmod: listingLastmod,
@@ -1218,8 +931,6 @@ function collectSitemapEntriesFromDynamicCollections() {
 
     const languages = Object.keys(PAGES);
     for (const lang of languages) {
-      /** @type {Record<string, CollectionEntry[]>} */
-      /** @type {Record<string, CollectionEntry[]>} */
       const langCollections = PAGES[lang] ?? {};
       const langSlugPattern =
         typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
@@ -1249,7 +960,7 @@ function collectSitemapEntriesFromDynamicCollections() {
             : (langSlugPattern ?? key);
 
         const canonical = buildContentUrl(null, lang, slug);
-        const absoluteLoc = meta.resolveUrl(canonical);
+        const absoluteLoc = metaEngine.resolveUrl(canonical);
 
         /** @type {number | null} */
         let latestTimestamp = null;
@@ -1366,15 +1077,14 @@ async function buildContentPages() {
     });
 
     const dictionary = _i18n.get(file.lang);
-    const componentContext = buildContentComponentContext(
+    const componentContext = renderEngine.buildContentComponentContext(
       file.header,
       file.lang,
       dictionary,
+      { i18n: _i18n, pages: PAGES },
     );
-    const { markdown: markdownSource, placeholders } = renderMarkdownComponents(
-      file.content,
-      componentContext,
-    );
+    const { markdown: markdownSource, placeholders } =
+      renderEngine.renderMarkdownComponents(file.content, componentContext);
     if (placeholders.length > 0) {
       _log.step("COMPONENT_SLOTS", {
         file: normalizeLogPath(file.sourcePath),
@@ -1382,14 +1092,14 @@ async function buildContentPages() {
       });
     }
 
-    const markdownHtml = parseMarkdown(markdownSource ?? "");
-    const hydratedHtml = injectMarkdownComponents(
+    const markdownHtml = renderEngine.parseMarkdown(markdownSource ?? "");
+    const hydratedHtml = renderEngine.injectMarkdownComponents(
       markdownHtml ?? "",
       placeholders,
     );
 
     if (file.template === "collection" || file.template === "home") {
-      await buildPaginatedCollectionPages({
+      await renderEngine.buildPaginatedCollectionPages({
         frontMatter: file.header,
         lang: file.lang,
         baseSlug: file.slug,
@@ -1398,6 +1108,28 @@ async function buildContentPages() {
         contentHtml: hydratedHtml,
         dictionary,
         sourcePath: file.sourcePath,
+        pages: PAGES,
+        renderContentTemplate,
+        buildViewPayload: (input) =>
+          renderEngine.buildViewPayload(input, {
+            pages: PAGES,
+            i18n: _i18n,
+            metaEngine,
+            menuEngine,
+            getFooterData,
+            analyticsSnippets: _analytics.snippets,
+            buildEasterEggPayload,
+          }),
+        renderPage,
+        metaEngine,
+        menuEngine,
+        resolveListingKey,
+        resolveListingEmpty,
+        resolveCollectionType,
+        buildCollectionTypeFlags,
+        resolvePaginationSegment,
+        dedupeCollectionItems,
+        byteLength,
       });
 
       continue;
@@ -1410,15 +1142,30 @@ async function buildContentPages() {
       file.lang,
       dictionary,
     );
-    const pageMeta = meta.buildPageMeta(file.header, file.lang, file.slug);
-    const activeMenuKey = menu.resolveActiveMenuKey(file.header);
-    const view = buildViewPayload({
-      lang: file.lang,
-      activeMenuKey,
-      pageMeta,
-      content: contentHtml,
-      dictionary,
-    });
+    const pageMeta = metaEngine.buildPageMeta(
+      file.header,
+      file.lang,
+      file.slug,
+    );
+    const activeMenuKey = menuEngine.resolveActiveMenuKey(file.header);
+    const view = renderEngine.buildViewPayload(
+      {
+        lang: file.lang,
+        activeMenuKey,
+        pageMeta,
+        content: contentHtml,
+        dictionary,
+      },
+      {
+        pages: PAGES,
+        i18n: _i18n,
+        metaEngine,
+        menuEngine,
+        getFooterData,
+        analyticsSnippets: _analytics.snippets,
+        buildEasterEggPayload,
+      },
+    );
 
     await renderPage({
       layoutName: file.layout,
@@ -1437,146 +1184,32 @@ async function buildContentPages() {
     });
   }
 
-  await buildDynamicCollectionPages();
-}
-
-/**
- * @param {{ frontMatter: FrontMatter, lang: string, baseSlug: string, layoutName: string, templateName: string, contentHtml: string, dictionary: Record<string, any>, sourcePath: string }} options
- */
-async function buildPaginatedCollectionPages(options) {
-  const {
-    frontMatter,
-    lang,
-    baseSlug,
-    layoutName,
-    templateName,
-    contentHtml,
-    dictionary,
-    sourcePath,
-  } = options;
-
-  const langCollections = PAGES[lang] ?? {};
-  const key = resolveListingKey(frontMatter);
-  const sourceItems =
-    key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
-  const allItems = dedupeCollectionItems(sourceItems);
-  const pageSizeSetting = _cfg.content.pagination.pageSize;
-  const pageSize = pageSizeSetting > 0 ? pageSizeSetting : 5;
-  const totalPages = Math.max(
-    1,
-    pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1,
-  );
-  const emptyMessage = resolveListingEmpty(frontMatter, lang);
-  const collectionType = resolveCollectionType(frontMatter, allItems);
-  const collectionFlags = buildCollectionTypeFlags(collectionType);
-
-  for (let pageIndex = 1; pageIndex <= totalPages; pageIndex += 1) {
-    const startIndex = (pageIndex - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const items = allItems.slice(startIndex, endIndex);
-    const hasItems = items.length > 0;
-    const hasPrev = pageIndex > 1;
-    const hasNext = pageIndex < totalPages;
-
-    const segment = resolvePaginationSegment(lang);
-
-    const base = baseSlug.replace(/\/+$/, "");
-
-    const pageSlug =
-      pageIndex === 1
-        ? baseSlug
-        : base
-          ? `${base}/${segment}-${pageIndex}`
-          : `${segment}-${pageIndex}`;
-
-    const prevSlug =
-      pageIndex > 2
-        ? base
-          ? `${base}/${segment}-${pageIndex - 1}`
-          : `${segment}-${pageIndex - 1}`
-        : baseSlug;
-
-    const nextSlug = base
-      ? `${base}/${segment}-${pageIndex + 1}`
-      : `${segment}-${pageIndex + 1}`;
-
-    const listing = {
-      key,
-      lang,
-      items,
-      hasItems,
-      emptyMessage,
-      page: pageIndex,
-      totalPages,
-      hasPrev,
-      hasNext,
-      hasPagination: totalPages > 1,
-      prevUrl: hasPrev ? buildContentUrl(null, lang, prevSlug) : "",
-      nextUrl: hasNext ? buildContentUrl(null, lang, nextSlug) : "",
-      type: collectionType,
-      ...collectionFlags,
-    };
-
-    let canonical = frontMatter.canonical;
-    if (pageIndex > 1) {
-      if (
-        typeof frontMatter.canonical === "string" &&
-        frontMatter.canonical.trim().length > 0
-      ) {
-        const trimmed = frontMatter.canonical.trim().replace(/\/+$/, "");
-        canonical = `${trimmed}/${segment}-${pageIndex}/`;
-      } else {
-        canonical = undefined;
-      }
-    }
-
-    const frontForPage = /** @type {FrontMatter} */ ({
-      ...frontMatter,
-      slug: pageSlug,
-      canonical,
-    });
-
-    if (collectionType) {
-      frontForPage.collectionType = collectionType;
-    }
-
-    const renderedContent = await renderContentTemplate(
-      templateName,
-      contentHtml,
-      frontForPage,
-      lang,
-      dictionary,
-      listing,
-    );
-
-    const pageMeta = meta.buildPageMeta(frontForPage, lang, pageSlug);
-    const activeMenuKey = menu.resolveActiveMenuKey(frontForPage);
-    const view = buildViewPayload({
-      lang,
-      activeMenuKey,
-      pageMeta,
-      content: renderedContent,
-      dictionary,
-    });
-
-    await renderPage({
-      layoutName,
-      view,
-      front: frontForPage,
-      lang,
-      slug: pageSlug,
-      writeMeta: {
-        action: "BUILD_COLLECTION",
-        type: templateName,
-        source: sourcePath,
-        lang,
-        template: layoutName,
-        items: items.length,
-        page: `${pageIndex}/${totalPages}`,
-        inputBytes: byteLength(renderedContent),
-      },
-    });
-  }
+  await renderEngine.buildDynamicCollectionPages({
+    collectionsConfig: COLLECTION_CONFIG,
+    pages: PAGES,
+    i18n: _i18n,
+    renderContentTemplate,
+    buildViewPayload: (input) =>
+      renderEngine.buildViewPayload(input, {
+        pages: PAGES,
+        i18n: _i18n,
+        metaEngine,
+        menuEngine,
+        getFooterData,
+        analyticsSnippets: _analytics.snippets,
+        buildEasterEggPayload,
+      }),
+    renderPage,
+    metaEngine,
+    menuEngine,
+    resolveCollectionType,
+    normalizeCollectionTypeValue,
+    resolveCollectionDisplayKey,
+    dedupeCollectionItems,
+    normalizeLogPath,
+    io: _io,
+    byteLength,
+  });
 }
 
 /** @param {string} configKey @param {string} defaultKey @param {CollectionEntry[]} items */
@@ -1627,209 +1260,6 @@ function dedupeCollectionItems(items) {
   return order;
 }
 
-async function buildDynamicCollectionPages() {
-  if (!COLLECTION_CONFIG || typeof COLLECTION_CONFIG !== "object") {
-    return;
-  }
-
-  const configKeys = Object.keys(COLLECTION_CONFIG);
-  for (const configKey of configKeys) {
-    const config = COLLECTION_CONFIG[configKey];
-    if (!config || typeof config !== "object") {
-      continue;
-    }
-
-    const templateName =
-      typeof config.template === "string" && config.template.trim().length > 0
-        ? config.template.trim()
-        : "category";
-
-    const slugPattern =
-      config.slugPattern && typeof config.slugPattern === "object"
-        ? /** @type {Record<string, string>} */ (config.slugPattern)
-        : {};
-    const pairs =
-      config.pairs && typeof config.pairs === "object"
-        ? /** @type {Record<string, Record<string, string>>} */ (config.pairs)
-        : null;
-
-    const rawTypes =
-      Array.isArray(config.types) && config.types.length > 0
-        ? /** @type {unknown[]} */ (config.types)
-        : null;
-    const types = rawTypes
-      ? rawTypes
-          .map((value) => (typeof value === "string" ? value.trim() : ""))
-          .filter((value) => value.length > 0)
-      : null;
-
-    if (!types || types.length === 0) {
-      continue;
-    }
-
-    const languages = Object.keys(PAGES);
-    for (const lang of languages) {
-      const langCollections = PAGES[lang] ?? {};
-      const dictionary = _i18n.get(lang);
-      const langSlugPattern =
-        typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
-      const titleSuffix = _i18n.t(
-        lang,
-        `seo.collections.${configKey}.titleSuffix`,
-        "",
-      );
-
-      const collectionKeys = Object.keys(langCollections);
-      for (const key of collectionKeys) {
-        /** @type {CollectionEntry[]} */
-        const items = langCollections[key] ?? [];
-        if (!Array.isArray(items) || items.length === 0) {
-          continue;
-        }
-
-        const typedItems = items.filter((entry) => {
-          if (!entry) {
-            return false;
-          }
-          const entryType =
-            typeof entry.type === "string" ? entry.type.trim() : "";
-          if (!entryType) {
-            return false;
-          }
-          return types.includes(entryType);
-        });
-        if (!typedItems.length) {
-          continue;
-        }
-
-        const dedupedItems = dedupeCollectionItems(typedItems);
-        if (!dedupedItems.length) {
-          continue;
-        }
-
-        const slug =
-          langSlugPattern && langSlugPattern.includes("{{key}}")
-            ? langSlugPattern.replace("{{key}}", key)
-            : (langSlugPattern ?? key);
-
-        let alternate;
-        if (pairs) {
-          const pairEntry = pairs[key];
-          if (pairEntry && typeof pairEntry === "object") {
-            /** @type {Record<string, string>} */
-            const altMap = {};
-            _i18n.supported.forEach((altLang) => {
-              if (altLang === lang) {
-                return;
-              }
-
-              const altKey =
-                typeof pairEntry[altLang] === "string"
-                  ? pairEntry[altLang].trim()
-                  : "";
-              if (!altKey) {
-                return;
-              }
-
-              const altSlugPattern =
-                typeof slugPattern[altLang] === "string"
-                  ? slugPattern[altLang]
-                  : null;
-              const altSlug =
-                altSlugPattern && altSlugPattern.includes("{{key}}")
-                  ? altSlugPattern.replace("{{key}}", altKey)
-                  : (altSlugPattern ?? altKey);
-              altMap[altLang] = buildContentUrl(null, altLang, altSlug);
-            });
-
-            if (Object.keys(altMap).length > 0) {
-              alternate = altMap;
-            }
-          }
-        }
-
-        const displayKey = resolveCollectionDisplayKey(
-          configKey,
-          key,
-          dedupedItems,
-        );
-        const baseTitle = displayKey;
-        const normalizedTitleSuffix =
-          typeof titleSuffix === "string" && titleSuffix.trim().length > 0
-            ? titleSuffix.trim()
-            : "";
-        const effectiveTitle = normalizedTitleSuffix
-          ? `${baseTitle} | ${normalizedTitleSuffix}`
-          : baseTitle;
-        const frontTitle = configKey === "series" ? displayKey : effectiveTitle;
-        const front = /** @type {FrontMatter} */ ({
-          title: frontTitle,
-          metaTitle: effectiveTitle,
-          slug,
-          template: templateName,
-          listKey: key,
-          ...(alternate ? { alternate } : {}),
-        });
-
-        front.listHeading = effectiveTitle;
-        if (configKey === "series") {
-          front.series = key;
-          front.seriesTitle = displayKey;
-        }
-
-        const fallbackType = normalizeCollectionTypeValue(
-          types.length === 1 ? types[0] : "",
-        );
-        const resolvedCollectionType = resolveCollectionType(
-          front,
-          dedupedItems,
-          fallbackType,
-        );
-        if (resolvedCollectionType) {
-          front.collectionType = resolvedCollectionType;
-        }
-
-        const contentHtml = await renderContentTemplate(
-          templateName,
-          "",
-          front,
-          lang,
-          dictionary,
-        );
-        const pageMeta = meta.buildPageMeta(front, lang, slug);
-        const layoutName = "default";
-        const activeMenuKey = menu.resolveActiveMenuKey(front);
-        const view = buildViewPayload({
-          lang,
-          activeMenuKey,
-          pageMeta,
-          content: contentHtml,
-          dictionary,
-        });
-
-        await renderPage({
-          layoutName,
-          view,
-          front,
-          lang,
-          slug,
-          writeMeta: {
-            action: "BUILD_DYNAMIC_COLLECTION",
-            type: templateName,
-            source: normalizeLogPath(
-              _io.path.combine("collections", configKey),
-            ),
-            lang,
-            template: layoutName,
-            items: dedupedItems.length,
-            inputBytes: byteLength(contentHtml),
-          },
-        });
-      }
-    }
-  }
-}
-
 /** @param {string} lang @param {string} slug */
 function registerLegacyPaths(lang, slug) {
   const cleaned = (slug ?? "").replace(/^\/+/, "");
@@ -1861,7 +1291,10 @@ async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
     }
 
     const raw = await _io.file.read(fullPath);
-    const transformed = await transformHtml(raw);
+    const transformed = await renderEngine.transformHtml(raw, {
+      versionToken,
+      minifyHtml,
+    });
     if (relPath === "index.html") {
       _i18n.supported.forEach(async (langCode) => {
         const localized = applyLanguageMetadata(transformed, langCode);
@@ -1921,14 +1354,16 @@ async function main() {
   await pluginEngine.execute(_plugin.hooks.CONTENT_LOAD);
   // content:load --->
 
-  await menu.build();
-  PAGES = await buildCategoryTagCollections();
-  FOOTER_POLICIES = await buildFooterPoliciesFromContent();
-  CONTENT_INDEX = await buildContentIndex();
+  await menuEngine.build();
+  PAGES = contentRegistry.buildCategoryTagCollections();
+  FOOTER_POLICIES = contentRegistry.buildFooterPolicies();
+  CONTENT_INDEX = contentRegistry.buildContentIndex();
+  await pluginEngine.execute(_plugin.hooks.CONTENT_READY);
 
   await buildContentPages();
   await copyHtmlRecursive();
   await buildSitemap();
+  await flushPages();
 }
 
 const API = {

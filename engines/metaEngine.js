@@ -1,10 +1,6 @@
-import {
-  i18n as _i18n,
-  config as _cfg,
-  format as _fmt,
-} from "@shevky/base";
+import { i18n as _i18n, config as _cfg, format as _fmt } from "@shevky/base";
 
-import _analytics from "./analytics.js";
+import _analytics from "../scripts/analytics.js";
 
 /**
  * @typedef {Record<string, any>} FrontMatter
@@ -119,7 +115,9 @@ class MetaEngine {
     const role = _i18n.t(
       lang,
       "site.role",
-      FALLBACK_ROLES[lang] ?? FALLBACK_ROLES[_i18n.default] ?? FALLBACK_ROLES.en,
+      FALLBACK_ROLES[lang] ??
+        FALLBACK_ROLES[_i18n.default] ??
+        FALLBACK_ROLES.en,
     );
 
     const quote = _i18n.t(
@@ -225,7 +223,9 @@ class MetaEngine {
     }
 
     if (typeof alternate === "object" && !Array.isArray(alternate)) {
-      const alternateRecord = /** @type {Record<string, unknown>} */ (alternate);
+      const alternateRecord = /** @type {Record<string, unknown>} */ (
+        alternate
+      );
       /** @type {Record<string, string>} */
       const map = {};
       Object.keys(alternateRecord).forEach((code) => {
@@ -329,6 +329,36 @@ class MetaEngine {
     return path.replace(/^\/+/, "").replace(/\/+$/, "");
   }
 
+  /** @param {string | null | undefined} canonical @param {string} lang @param {string} slug */
+  buildContentUrl(canonical, lang, slug) {
+    const normalizedLang = lang ?? _i18n.default;
+    if (typeof canonical === "string" && canonical.trim().length > 0) {
+      const trimmedCanonical = canonical.trim();
+      const relative = this.canonicalToRelativePath(trimmedCanonical);
+      if (relative) {
+        const normalizedRelative = `/${relative}`.replace(/\/+/g, "/");
+        return this.ensureDirectoryTrailingSlash(normalizedRelative);
+      }
+
+      return this.ensureDirectoryTrailingSlash(trimmedCanonical);
+    }
+    const fallback = this.canonicalToRelativePath(
+      this.defaultCanonical(normalizedLang, slug),
+    );
+    if (fallback) {
+      const normalizedFallback = `/${fallback}`.replace(/\/+/g, "/");
+      return this.ensureDirectoryTrailingSlash(normalizedFallback);
+    }
+    const slugSegment = slug ? `/${slug}` : "/";
+    if (normalizedLang !== _i18n.default) {
+      const langPath = `/${normalizedLang}${slugSegment}`.replace(/\/+/g, "/");
+      return this.ensureDirectoryTrailingSlash(langPath);
+    }
+
+    const normalizedSlug = slugSegment.replace(/\/+/g, "/");
+    return this.ensureDirectoryTrailingSlash(normalizedSlug);
+  }
+
   /** @param {FrontMatter} front @param {string} lang */
   _resolveArticleSection(front, lang) {
     const rawCategory =
@@ -355,7 +385,11 @@ class MetaEngine {
     if (source && Array.isArray(source.keywords) && source.keywords.length) {
       return source.keywords;
     }
-    if (fallback && Array.isArray(fallback.keywords) && fallback.keywords.length) {
+    if (
+      fallback &&
+      Array.isArray(fallback.keywords) &&
+      fallback.keywords.length
+    ) {
       return fallback.keywords;
     }
     return [];
@@ -400,7 +434,9 @@ class MetaEngine {
     const typeValue =
       typeof front.type === "string" ? front.type.trim().toLowerCase() : "";
     const templateValue =
-      typeof front.template === "string" ? front.template.trim().toLowerCase() : "";
+      typeof front.template === "string"
+        ? front.template.trim().toLowerCase()
+        : "";
     const isArticle =
       templateValue === "post" ||
       typeValue === "article" ||
@@ -641,7 +677,9 @@ class MetaEngine {
     });
 
     if (keywordsArray.filter((i) => i && i.trim().length > 0).length) {
-      structured.keywords = keywordsArray.filter((i) => i && i.trim().length > 0);
+      structured.keywords = keywordsArray.filter(
+        (i) => i && i.trim().length > 0,
+      );
     }
 
     return this.serializeForInlineScript(structured);
@@ -684,11 +722,17 @@ class MetaEngine {
    */
   buildPageMeta(input, lang, slug) {
     const front =
-      input && typeof input === "object" && input.header && typeof input.header === "object"
+      input &&
+      typeof input === "object" &&
+      input.header &&
+      typeof input.header === "object"
         ? input.header
         : /** @type {FrontMatter} */ (input ?? {});
     const derived =
-      input && typeof input === "object" && input.header && typeof input.header === "object"
+      input &&
+      typeof input === "object" &&
+      input.header &&
+      typeof input.header === "object"
         ? input
         : front;
     const canonicalUrl = this.resolveUrl(

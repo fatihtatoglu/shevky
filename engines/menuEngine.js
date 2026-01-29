@@ -13,9 +13,9 @@ export class MenuEngine {
   #_contentRegistry;
 
   /**
-   * @type {(canonical: string | null | undefined, lang: string, slug: string) => string}
+   * @type {{ buildContentUrl: (canonical: string | null | undefined, lang: string, slug: string) => string }}
    */
-  #_buildContentUrl;
+  #_metaEngine;
 
   /**
    * @type {Record<string, MenuEntry[]>}
@@ -24,11 +24,11 @@ export class MenuEngine {
 
   /**
    * @param {ContentRegistry} contentRegistry
-   * @param {(canonical: string | null | undefined, lang: string, slug: string) => string} buildContentUrl
+   * @param {{ buildContentUrl: (canonical: string | null | undefined, lang: string, slug: string) => string }} metaEngine
    */
-  constructor(contentRegistry, buildContentUrl) {
+  constructor(contentRegistry, metaEngine) {
     this.#_contentRegistry = contentRegistry;
-    this.#_buildContentUrl = buildContentUrl;
+    this.#_metaEngine = metaEngine;
   }
 
   async build() {
@@ -46,7 +46,11 @@ export class MenuEngine {
         this.#_cache[item.lang] = [];
       }
 
-      const url = this.#_buildContentUrl(item.url, item.lang, item.slug);
+      const url = this.#_metaEngine.buildContentUrl(
+        item.url,
+        item.lang,
+        item.slug,
+      );
       this.#_cache[item.lang].push({ ...item.toObject(), url });
     }
 

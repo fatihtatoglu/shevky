@@ -9,7 +9,6 @@ import {
   config as _cfg,
   log as _log,
   format as _fmt,
-  exec as _exec,
   plugin as _plugin,
 } from "@shevky/base";
 
@@ -19,7 +18,6 @@ import _social from "./social.js";
 
 import { MetaEngine } from "../engines/metaEngine.js";
 import { RenderEngine } from "../engines/renderEngine.js";
-
 
 import { PluginRegistry } from "../registries/pluginRegistry.js";
 import {
@@ -36,13 +34,11 @@ import { PluginEngine } from "../engines/pluginEngine.js";
 import { MenuEngine } from "../engines/menuEngine.js";
 
 /** @typedef {import("../lib/contentFile.js").ContentFile} ContentFile */
-/** @typedef {Record<string, any>} FrontMatter */
-/** @typedef {import("../types/index.d.ts").ContentSummaryLike} ContentSummaryLike */
+/** @typedef {import("../types/index.d.ts").FrontMatter} FrontMatter */
 /** @typedef {import("../types/index.d.ts").CollectionEntry} CollectionEntry */
 /** @typedef {import("../types/index.d.ts").CollectionsByLang} CollectionsByLang */
-/** @typedef {{ key: string, label: string, url: string, lang: string }} FooterPolicy */
+/** @typedef {import("../types/index.d.ts").FooterPolicy} FooterPolicy */
 
-const ROOT_DIR = _prj.rootDir;
 const SRC_DIR = _prj.srcDir;
 const DIST_DIR = _prj.distDir;
 const CONTENT_DIR = _prj.contentDir;
@@ -58,7 +54,6 @@ const templateRegistry = new TemplateRegistry();
 const pageRegistry = new PageRegistry();
 
 const metaEngine = new MetaEngine();
-const buildContentUrl = metaEngine.buildContentUrl.bind(metaEngine);
 const contentRegistry = new ContentRegistry(metaEngine);
 const pluginEngine = new PluginEngine(
   pluginRegistry,
@@ -85,7 +80,6 @@ await templateRegistry.loadTemplates(TEMPLATES_DIR);
 await pluginRegistry.load(_cfg.plugins);
 
 const versionToken = crypto.randomBytes(6).toString("hex");
-const SEO_INCLUDE_COLLECTIONS = _cfg.seo.includeCollections;
 const DEFAULT_IMAGE = _cfg.seo.defaultImage;
 /** @type {Record<string, string>} */
 const FALLBACK_TAGLINES = { tr: "-", en: "-" };
@@ -330,7 +324,7 @@ function buildTagUrlFromKey(key, lang) {
     return null;
   }
 
-  return buildContentUrl(null, lang, slug);
+  return metaEngine.buildContentUrl(null, lang, slug);
 }
 
 /** @param {string} label @param {string} lang */
@@ -471,7 +465,7 @@ async function renderContentTemplate(
       ? _fmt.slugify(front.category)
       : "";
   const categoryUrl = categorySlug
-    ? buildContentUrl(null, lang, categorySlug)
+    ? metaEngine.buildContentUrl(null, lang, categorySlug)
     : null;
   const resolvedDictionary = dictionary ?? _i18n.get(lang);
   const normalizedFront = /** @type {FrontMatter} */ ({
@@ -550,7 +544,7 @@ async function renderPage({ layoutName, view, front, lang, slug, writeMeta }) {
           : "",
     lang,
     slug,
-    canonical: buildContentUrl(front?.canonical, lang, slug),
+    canonical: metaEngine.buildContentUrl(front?.canonical, lang, slug),
     layout: layoutName,
     template: typeof front?.template === "string" ? front.template : "",
     front,
@@ -785,279 +779,6 @@ function resolveListingHeading(front) {
     return front.title.trim();
   }
   return "";
-}
-
-/** @returns {Promise<Array<{ loc: string, lastmod: string }>>} */
-async function collectSitemapEntriesFromContent() {
-  if (contentRegistry.count === 0) {
-    return [];
-  }
-
-  /** @type {Array<{ loc: string, lastmod: string }>} */
-  const urls = [];
-  const contentFiles = /** @type {ContentFile[]} */ (
-    /** @type {unknown} */ (contentRegistry.files)
-  );
-  for (const file of contentFiles) {
-    if (!file.isValid || file.isDraft || !file.isPublished) {
-      continue;
-    }
-
-    const absoluteLoc = metaEngine.resolveUrl(file.canonical);
-    const updated = file.updated ?? file.date;
-    const baseLastmod = _fmt.lastMod(updated) ?? new Date().toISOString();
-
-    urls.push({
-      loc: absoluteLoc,
-      lastmod: baseLastmod,
-    });
-
-    if (
-      _cfg.seo.includePaging &&
-      (file.template === "collection" || file.template === "home")
-    ) {
-      const langCollections = PAGES[file.lang] ?? {};
-      const key = resolveListingKey(file.header);
-      const allItems =
-        key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
-      const pageSizeSetting = _cfg.content.pagination.pageSize;
-      const pageSize = pageSizeSetting > 0 ? pageSizeSetting : 5;
-      const totalPages = Math.max(
-        1,
-        pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1,
-      );
-
-      if (totalPages > 1) {
-        const segment = resolvePaginationSegment(file.lang);
-
-        const baseSlug = file.slug.replace(/\/+$/, "");
-
-        /** @type {number | null} */
-        let latestTimestamp = null;
-        if (Array.isArray(allItems)) {
-          allItems.forEach((item) => {
-            if (!item || !item.date) return;
-            const ts = Date.parse(String(item.date));
-            if (!Number.isNaN(ts)) {
-              if (latestTimestamp == null || ts > latestTimestamp) {
-                latestTimestamp = ts;
-              }
-            }
-          });
-        }
-        const listingLastmod =
-          latestTimestamp != null
-            ? (_fmt.lastMod(new Date(latestTimestamp)) ??
-              new Date().toISOString())
-            : baseLastmod;
-
-        for (let pageIndex = 2; pageIndex <= totalPages; pageIndex += 1) {
-          const pageSlug = baseSlug
-            ? `${baseSlug}/${segment}-${pageIndex}`
-            : `${segment}-${pageIndex}`;
-
-          let canonicalOverride;
-          const header = /** @type {FrontMatter} */ (file.header);
-          const canonicalSource =
-            typeof header?.canonical === "string"
-              ? header.canonical
-              : file.canonical;
-          if (
-            typeof canonicalSource === "string" &&
-            canonicalSource.trim().length > 0
-          ) {
-            const trimmed = canonicalSource.trim().replace(/\/+$/, "");
-            canonicalOverride = `${trimmed}/${segment}-${pageIndex}/`;
-          } else {
-            canonicalOverride = undefined;
-          }
-
-          const pageCanonical = buildContentUrl(
-            canonicalOverride,
-            file.lang,
-            pageSlug,
-          );
-          const pageAbsoluteLoc = metaEngine.resolveUrl(pageCanonical);
-          urls.push({
-            loc: pageAbsoluteLoc,
-            lastmod: listingLastmod,
-          });
-        }
-      }
-    }
-  }
-
-  urls.sort((a, b) => (a.loc || "").localeCompare(b.loc || ""));
-
-  return urls;
-}
-
-function collectSitemapEntriesFromDynamicCollections() {
-  /** @type {Array<{ loc: string, lastmod: string }>} */
-  const urls = [];
-  if (!COLLECTION_CONFIG || typeof COLLECTION_CONFIG !== "object") {
-    return urls;
-  }
-
-  const configKeys = Object.keys(COLLECTION_CONFIG);
-  for (const configKey of configKeys) {
-    const config = COLLECTION_CONFIG[configKey];
-    if (!config || typeof config !== "object") {
-      continue;
-    }
-
-    const slugPattern =
-      config.slugPattern && typeof config.slugPattern === "object"
-        ? /** @type {Record<string, string>} */ (config.slugPattern)
-        : {};
-
-    const rawTypes =
-      Array.isArray(config.types) && config.types.length > 0
-        ? /** @type {unknown[]} */ (config.types)
-        : null;
-    const types = rawTypes
-      ? rawTypes
-          .map((value) =>
-            normalizeCollectionTypeValue(
-              typeof value === "string" ? value : "",
-            ),
-          )
-          .filter((value) => value.length > 0)
-      : null;
-
-    if (!types || types.length === 0) {
-      continue;
-    }
-
-    const languages = Object.keys(PAGES);
-    for (const lang of languages) {
-      const langCollections = PAGES[lang] ?? {};
-      const langSlugPattern =
-        typeof slugPattern[lang] === "string" ? slugPattern[lang] : null;
-
-      const collectionKeys = Object.keys(langCollections);
-      for (const key of collectionKeys) {
-        const sourceItems = langCollections[key] ?? [];
-        if (!Array.isArray(sourceItems) || sourceItems.length === 0) {
-          continue;
-        }
-        /** @type {CollectionEntry[]} */
-        const items = dedupeCollectionItems(sourceItems);
-        if (items.length === 0) {
-          continue;
-        }
-
-        const hasMatchingType = items.some((entry) =>
-          types.includes(normalizeCollectionTypeValue(entry.type)),
-        );
-        if (!hasMatchingType) {
-          continue;
-        }
-
-        const slug =
-          langSlugPattern && langSlugPattern.includes("{{key}}")
-            ? langSlugPattern.replace("{{key}}", key)
-            : (langSlugPattern ?? key);
-
-        const canonical = buildContentUrl(null, lang, slug);
-        const absoluteLoc = metaEngine.resolveUrl(canonical);
-
-        /** @type {number | null} */
-        let latestTimestamp = null;
-        items.forEach((item) => {
-          if (!item || !item.date) return;
-          const ts = Date.parse(String(item.updated ?? item.date));
-          if (!Number.isNaN(ts)) {
-            if (latestTimestamp == null || ts > latestTimestamp) {
-              latestTimestamp = ts;
-            }
-          }
-        });
-
-        const lastmod =
-          latestTimestamp != null
-            ? (_fmt.lastMod(new Date(latestTimestamp)) ??
-              new Date().toISOString())
-            : new Date().toISOString();
-
-        urls.push({
-          loc: absoluteLoc,
-          lastmod,
-        });
-      }
-    }
-  }
-
-  urls.sort((a, b) => (a.loc || "").localeCompare(b.loc || ""));
-  return urls;
-}
-
-async function buildSitemap() {
-  const contentEntries = await collectSitemapEntriesFromContent();
-  const collectionEntries = SEO_INCLUDE_COLLECTIONS
-    ? collectSitemapEntriesFromDynamicCollections()
-    : [];
-  const combined = [...contentEntries, ...collectionEntries];
-  if (!combined.length) {
-    return;
-  }
-
-  const entryByLoc = new Map();
-  combined.forEach((entry) => {
-    if (!entry || !entry.loc) return;
-    const key = entry.loc;
-    const existing = entryByLoc.get(key);
-    if (!existing) {
-      entryByLoc.set(key, entry);
-      return;
-    }
-    const existingDate = existing.lastmod
-      ? Date.parse(String(existing.lastmod))
-      : null;
-    const incomingDate = entry.lastmod
-      ? Date.parse(String(entry.lastmod))
-      : null;
-    if (
-      incomingDate != null &&
-      !Number.isNaN(incomingDate) &&
-      (existingDate == null ||
-        Number.isNaN(existingDate) ||
-        incomingDate > existingDate)
-    ) {
-      entryByLoc.set(key, entry);
-    }
-  });
-
-  const entries = Array.from(entryByLoc.values()).sort((a, b) =>
-    (a.loc || "").localeCompare(b.loc || ""),
-  );
-
-  const urlset = entries
-    .map((entry) => {
-      const parts = ["  <url>", `    <loc>${_fmt.escape(entry.loc)}</loc>`];
-      if (entry.lastmod) {
-        parts.push(`    <lastmod>${_fmt.escape(entry.lastmod)}</lastmod>`);
-      }
-      parts.push("  </url>");
-      return parts.join("\n");
-    })
-    .join("\n");
-
-  const sitemapXml = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<?xml-stylesheet type="text/xsl" href="/assets/sitemap.xsl"?>',
-    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-    urlset,
-    "</urlset>",
-    "",
-  ].join("\n");
-
-  await writeHtmlFile("sitemap.xml", sitemapXml, {
-    action: "BUILD_SITEMAP",
-    type: "xml",
-    items: entries.length,
-    inputBytes: byteLength(urlset),
-  });
 }
 
 async function buildContentPages() {
@@ -1362,7 +1083,6 @@ async function main() {
 
   await buildContentPages();
   await copyHtmlRecursive();
-  await buildSitemap();
   await flushPages();
 }
 

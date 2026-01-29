@@ -75,3 +75,5 @@ export type CollectionEntry = ContentSummaryLike & {
 };
 
 export type CollectionsByLang = Record<string, Record<string, CollectionEntry[]>>;
+
+export type FrontMatter = Record<string, any>;

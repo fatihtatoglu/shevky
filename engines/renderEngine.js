@@ -344,8 +344,9 @@ export class RenderEngine {
       byteLength,
     } = options;
 
+    const normalizedFrontMatter = normalizeFrontMatter(frontMatter);
     const langCollections = pages[lang] ?? {};
-    const key = resolveListingKey(frontMatter);
+    const key = resolveListingKey(normalizedFrontMatter);
     const sourceItems =
       key && Array.isArray(langCollections[key]) ? langCollections[key] : [];
     const allItems = dedupeCollectionItems(sourceItems);
@@ -355,8 +356,8 @@ export class RenderEngine {
       1,
       pageSize > 0 ? Math.ceil(allItems.length / pageSize) : 1,
     );
-    const emptyMessage = resolveListingEmpty(frontMatter, lang);
-    const collectionType = resolveCollectionType(frontMatter, allItems);
+    const emptyMessage = resolveListingEmpty(normalizedFrontMatter, lang);
+    const collectionType = resolveCollectionType(normalizedFrontMatter, allItems);
     const collectionFlags = buildCollectionTypeFlags(collectionType);
 
     for (let pageIndex = 1; pageIndex <= totalPages; pageIndex += 1) {
@@ -410,13 +411,15 @@ export class RenderEngine {
         ...collectionFlags,
       };
 
-      let canonical = frontMatter.canonical;
+      let canonical = normalizedFrontMatter.canonical;
       if (pageIndex > 1) {
         if (
-          typeof frontMatter.canonical === "string" &&
-          frontMatter.canonical.trim().length > 0
+          typeof normalizedFrontMatter.canonical === "string" &&
+          normalizedFrontMatter.canonical.trim().length > 0
         ) {
-          const trimmed = frontMatter.canonical.trim().replace(/\/+$/, "");
+          const trimmed = normalizedFrontMatter.canonical
+            .trim()
+            .replace(/\/+$/, "");
           canonical = `${trimmed}/${segment}-${pageIndex}/`;
         } else {
           canonical = undefined;
@@ -424,7 +427,7 @@ export class RenderEngine {
       }
 
       const frontForPage = /** @type {Record<string, any>} */ ({
-        ...frontMatter,
+        ...normalizedFrontMatter,
         slug: pageSlug,
         canonical,
       });
@@ -803,4 +806,18 @@ export class RenderEngine {
   #_escapeRegExp(value = "") {
     return value.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&");
   }
+}
+
+/** @param {Record<string, any> | { raw?: unknown } | null | undefined} front */
+function normalizeFrontMatter(front) {
+  if (!front || typeof front !== "object") {
+    return {};
+  }
+
+  const raw =
+    "raw" in front && front.raw && typeof front.raw === "object"
+      ? front.raw
+      : front;
+
+  return typeof raw === "object" && raw !== null ? { ...raw } : {};
 }

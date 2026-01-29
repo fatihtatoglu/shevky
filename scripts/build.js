@@ -142,6 +142,20 @@ function normalizeLogPath(pathValue) {
   return normalized;
 }
 
+/** @param {FrontMatter | { raw?: unknown } | null | undefined} front */
+function normalizeFrontMatter(front) {
+  if (!front || typeof front !== "object") {
+    return {};
+  }
+
+  const raw =
+    "raw" in front && front.raw && typeof front.raw === "object"
+      ? front.raw
+      : front;
+
+  return typeof raw === "object" && raw !== null ? { ...raw } : {};
+}
+
 async function ensureDist() {
   await _io.directory.remove(DIST_DIR);
   await _io.directory.create(DIST_DIR);
@@ -447,6 +461,7 @@ async function renderContentTemplate(
   listingOverride,
 ) {
   const template = templateRegistry.getTemplate(TYPE_TEMPLATE, templateName);
+  const baseFront = normalizeFrontMatter(front);
   /** @type {string[]} */
   const normalizedTags = Array.isArray(front.tags)
     ? front.tags.filter(
@@ -469,7 +484,7 @@ async function renderContentTemplate(
     : null;
   const resolvedDictionary = dictionary ?? _i18n.get(lang);
   const normalizedFront = /** @type {FrontMatter} */ ({
-    ...front,
+    ...baseFront,
     tags: normalizedTags,
     tagLinks,
     hasTags: normalizedTags.length > 0,
